@@ -1,8 +1,7 @@
 # IsuDeck 🎛️
 
 <p align="center">
-  <strong>Eski klavyenizi sanal bir Stream Deck'e dönüştürün.</strong><br>
-  <em>Turn any spare secondary keyboard or numpad into a dedicated, driver-isolated Virtual Stream Deck.</em>
+  <strong>Turn any spare keyboard or numpad into a dedicated, driver-isolated Virtual Stream Deck.</strong>
 </p>
 
 <p align="center">
@@ -15,159 +14,144 @@
 
 ---
 
-## 💡 IsuDeck Nedir? (What is IsuDeck?)
+## 💡 What is IsuDeck?
 
-**IsuDeck by rootcf**, masanızda veya çekmecenizde duran ikinci bir USB klavyeyi ya da harici bir numpad'i, ana klavyenizden **tamamen bağımsız çalışan** profesyonel bir kontrol konsoluna (Sanal Stream Deck) dönüştüren açık kaynaklı bir masaüstü uygulamasıdır.
+**IsuDeck by rootcf** is a free, open-source desktop application that repurposes any secondary USB keyboard, wireless numpad, or macro keypad into a fully isolated, professional control studio.
 
-Piyasadaki özel donanım konsolları binlerce liraya mal olurken, IsuDeck halihazırda sahip olduğunuz donanımları değerlendirmenizi sağlar.
+While dedicated hardware consoles cost hundreds of dollars and offer limited physical keys, IsuDeck allows you to turn your existing hardware into an unlimited macro console with **zero hardware costs**.
 
-### 🎯 En Önemli Farkı: Donanım Düzeyinde İzolasyon
-Windows standart olarak iki klavyeyi tek bir cihaz gibi algılar. İkinci klavyenizde bir harfe bastığınızda, normalde o an açık olan oyunda karakteriniz yürür veya yazı yazdığınız sohbete harf eklenir.
+### 🎯 The Core Difference: True Hardware Driver Isolation
+By default, Windows merges all attached keyboards into a single input stream. Pressing a key on a secondary keyboard normally sends characters to whatever game, text document, or active window you are currently in.
 
-**IsuDeck**, düşük seviyeli **Interception** sürücüsü sayesinde klavyeleri donanım kimlikleriyle (HID) ayırt eder:
-- İkinci klavyenizdeki tuş vuruşları Windows'a gitmeden işletim sistemi seviyesinde **yutulur (swallow)**.
-- Ana klavyeniz, oyunlarınız veya metin belgeleriniz asla bölünmez.
-- Yalnızca sizin atadığınız makro, ses efekti veya yayın aksiyonu anında tetiklenir.
-
----
-
-## ✨ Öne Çıkan Özellikler
-
-- 🦀 **Rust & Tauri v2 ile Yüksek Performans:** 500 MB RAM tüketen hantal Electron uygulamalarının aksine, arka planda **40 MB'ın altında bellek** kullanır. Oyunlarınızda tek bir kare (FPS) kaybı yaşatmaz.
-- ⚡ **Düşük Gecikmeli Yakalama Mimarisi:** `THREAD_PRIORITY_TIME_CRITICAL`, `HIGH_PRIORITY_CLASS` ve 1ms Windows multimedya zamanlayıcısı ile yüksek sistem yükü altında bile sıfır gecikmeli tuş tepkisi.
-- 🧠 **Mantık & Akış Kontrolleri (Logic & Flow Engine):** Değişkenler (`vol`, `counter`), sistem metrikleri (`$sys.volume`, `$sys.cpu`), koşullu dallanma (`If/Else`), döngüler (`Loop`) ve tuş başlıklarında canlı şablonlar (`{vol}%`).
-- 🔊 **Windows Ses Düzeyine Sabitleme:** Değişkenleri Windows Master Volume ile senkronize ederek tek tuşla hassas ses artırma/azaltma.
-- ⌨️ **Sınırsız Tuş Sayısı:** 15 tuşlu standart konsollarla sınırlı kalmayın. Tam boy bir klavye bağlayarak 104'ten fazla bağımsız kontrol tuşuna sahip olun.
-- 💡 **Canlı Durum Rozetleri (Dynamic State Badges):** Eklentiler (örn: OBS Studio) tuşların durumunu gerçek zamanlı günceller. Yayındayken `LIVE`, mikrofon susturulduğunda `MUTE`, kayıt alırken nabız gibi yanıp sönen `REC` rozeti belirir.
-- 🎨 **Vektör & Eklenti Özgün İkonları:** Lucide vektör ikon kütüphanesi, eklentilerin sağladığı özel ikonlar, emojiler veya özel PNG/SVG görselleri.
-- 🔌 **Açık Eklenti (Plugin) Mimarisi:** İki yönlü JSON-RPC stdio protokolü sayesinde Python, Rust, C# veya Node.js ile IsuDeck'e saniyeler içinde yeni eklentiler yazabilirsiniz.
-- 📦 **%100 Taşınabilir (Portable):** Kayıt defteri (registry) kirliliği yok. Tek bir `.exe` dosyasını flash belleğe atıp dilediğiniz bilgisayarda kullanabilirsiniz.
+**IsuDeck solves this at the kernel level using a low-level Interception driver:**
+- Keystrokes from your designated secondary keyboard are identified by their unique Hardware ID (HID).
+- Those keystrokes are **swallowed at the OS level** before Windows or your games can ever see them.
+- Your primary keyboard, gaming controls, and active typing remain 100% uninterrupted.
+- Only your designated IsuDeck macro, soundboard effect, or streaming action triggers instantly.
 
 ---
 
-## 📚 Dokümantasyon & Kullanım Kılavuzları
+## ✨ Key Features
 
-- 🇹🇷 **[KULLANIM_KILAVUZU.md](./KULLANIM_KILAVUZU.md)** — Türkçe detaylı kullanım, kurulum ve mantık kontrolleri kılavuzu.
-- 🇬🇧 **[USER_GUIDE.md](./USER_GUIDE.md)** — English comprehensive user guide and features walkthrough.
-- 🔌 **[PLUGIN_SDK.md](./PLUGIN_SDK.md)** — Eklenti geliştiricileri için SDK ve JSON-RPC protokol rehberi.
+- 🦀 **Ultra-Lightweight Rust & Tauri Core:** Consumes **under 40 MB of RAM** in the background, unlike bloated 500+ MB Electron alternatives. Ensures zero FPS drops during gaming sessions.
+- ⚡ **Time-Critical Realtime Capture:** Operates at `THREAD_PRIORITY_TIME_CRITICAL` and `HIGH_PRIORITY_CLASS` with a 1ms Windows multimedia timer (`timeBeginPeriod(1)`) for instantaneous macro triggering under heavy system load.
+- 🧠 **Dynamic Logic & Automation Engine:**
+  - **Variables:** Store and calculate custom numeric or text state (`SET_VARIABLE`, `CHANGE_VARIABLE`).
+  - **System Metrics:** Built-in `$sys.volume`, `$sys.cpu`, `$sys.ram`, and `$sys.time24` readings.
+  - **Dynamic Templates:** Render dynamic values on button labels and badges (e.g., `Master: {vol}%`, `CPU: {$sys.cpu}%`).
+  - **Windows Volume Sync:** Automatically synchronize custom volume variables with the Windows Master Audio level.
+  - **Conditionals & Loops:** Native `If / Else` branching and `Loop` repetition blocks.
+- 💡 **Live Status Badges:** Plugins push live updates in real time — OBS Studio displays glowing `LIVE`, `REC`, `MUTE`, or `STUDIO` indicators directly on keys.
+- ⌨️ **Unlimited Keys & Layouts:** Switch between 8-key (2x4), 15-key (3x5), 32-key (4x8), or full 104+ key keyboard layouts across unlimited custom profiles.
+- 🎨 **Visual Customization:** Browse hundreds of categorized Lucide vector icons, plugin icons, emojis, or upload custom PNG and SVG artwork.
+- 🔌 **Open Plugin Architecture:** Multi-language plugin support over JSON-RPC stdio. Create plugins in Python, Node.js, Rust, Go, or C#.
+- 📦 **100% Portable:** Clean self-contained deployment with zero Windows registry pollution.
 
 ---
 
-## 📊 Karşılaştırma
+## 📊 Comparison
 
-| Ölçüt | Özel Donanım Konsolları | IsuDeck |
+| Metric | Dedicated Hardware Consoles | IsuDeck |
 |---|:---:|:---:|
-| **Donanım Maliyeti** | 4.500 TL – 8.000 TL | **0 TL** (Eski klavyeniz) |
-| **Kullanılabilir Tuş Sayısı** | 6 / 15 / 32 tuş (Sabit) | **104+ tuş** (Tam boy klavye) |
-| **Sistem Bellek Kullanımı** | 200 – 600 MB RAM | **< 40 MB RAM** (Rust) |
-| **Klavyeyi İzole Etme** | Yok (Özel donanım şart) | **Var** (Kernel Sürücüsü ile) |
-| **Yazılım Lisansı** | Kapalı / Tescilli | **Özgür ve Açık Kaynak (GNU GPL v3)** |
+| **Hardware Cost** | \$150 – \$300+ | **\$0** (Any spare keyboard/numpad) |
+| **Available Keys** | 6 / 15 / 32 keys (Fixed) | **104+ keys** (Full-size keyboard) |
+| **Background RAM** | 200 – 600 MB | **< 40 MB** (Rust + Tauri) |
+| **Driver Isolation** | Dedicated hardware required | **Yes** (Kernel input filter) |
+| **Software License** | Proprietary | **Free & Open Source (GNU GPL v3)** |
 
 ---
 
-## 🚀 Hızlı Başlangıç (Quick Start)
+## 🏗️ Architecture Overview
 
-### 1. İndirin ve Çalıştırın
-[Releases](../../releases) sayfasından `IsuDeck.exe` dosyasını indirin. Kurulum gerekmez, çift tıklayıp açın.
-
-### 2. Sürücüyü Yükleyin (Tek Seferlik)
-IsuDeck ilk açıldığında klavyeleri ayırabilmek için sürücü kontrolü yapar:
-- **Ayarlar** menüsünden **"Sürücüyü Yükle"** butonuna basın.
-- İşlem tamamlandığında bilgisayarınızı **bir defaya mahsus yeniden başlatın**.
-
-### 3. İkinci Klavyenizi Bağlayın ve Tuş Atayın
-- Eski USB klavyenizi veya numpad'inizi bilgisayara takın.
-- IsuDeck arayüzünde dilediğiniz bir tuşa tıklayın.
-- **Tuş Ata (Key Binding)** sekmesinden *"Tuş Kaydet"*e basıp ikinci klavyenizdeki tuşa basın.
-- Aksiyonunuzu (Medya kontrolü, Uygulama Başlatma, Metin Yazma veya OBS sahne değişimi) seçin ve kaydedin!
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                    Secondary USB Keyboard / Numpad              │
+└────────────────────────────────┬────────────────────────────────┘
+                                 │ Keystroke
+                                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│               Low-Level Interception Kernel Driver              │
+│       • Filters by Device HID (Hardware ID)                     │
+│       • Swallows keypress (Windows never sees raw input)        │
+└────────────────────────────────┬────────────────────────────────┘
+                                 │ Captured Event
+                                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   IsuDeck Rust Engine (Tauri v2)                │
+│       • TIME_CRITICAL thread with 1ms timer precision           │
+│       • Logic & Flow Processor (Variables, If/Else, Loops)      │
+│       • Plugin Supervisor (JSON-RPC stdio IPC)                  │
+└────────────────┬───────────────────────────────┬────────────────┘
+                 │ Tauri Events                  │ stdio JSON-RPC
+                 ▼                               ▼
+┌─────────────────────────────────┐   ┌───────────────────────────┐
+│       IsuDeck UI (Next.js)      │   │     External Plugins      │
+│   • Profile & Button Editor     │   │   • OBS Studio (WebSocket)│
+│   • Realtime Live State Badges  │   │   • Custom Python/Node/Go │
+└─────────────────────────────────┘   └───────────────────────────┘
+```
 
 ---
 
-## 🔌 Eklenti (Plugin) Ekosistemi
+## 🚀 Quick Start
 
-IsuDeck, temel ihtiyaçları hafif bir çekirdekte sunar. OBS Studio, Spotify, Discord gibi gelişmiş entegrasyonlar ise eklentilerle sağlanır.
+### 1. Download & Install Driver
+1. Download the latest release from the [Releases](https://github.com/muzmahil/IsuDeck/releases) tab.
+2. Launch `IsuDeck.exe`.
+3. Open the **Settings** tab on the left sidebar.
+4. Under **Hardware Input Driver Status**, click **Install Driver** (requires administrator elevation).
+5. **Restart your computer once** to activate the kernel-level input filter.
 
-Eklentiler bağımsız çalıştırılabilir ikililerdir (`.exe`, Python vb.) ve IsuDeck ile standart `stdin`/`stdout` üzerinden JSON-RPC ile haberleşir.
-
-Kendi eklentinizi nasıl yazacağınızı öğrenmek için **[PLUGIN_SDK.md](./PLUGIN_SDK.md)** kılavuzunu inceleyin.
+### 2. Configure Your First Key
+1. Plug in your secondary keyboard or numpad.
+2. Open IsuDeck and click any button on the grid.
+3. Select **Record Key** and press a key on your secondary keyboard.
+4. Choose an action (e.g., Open Application, OBS Scene Switch, System Volume, or Custom Macro).
+5. Customize the button with Lucide vector icons, colors, or live badges.
 
 ---
 
-## 🛠️ Kaynak Koddan Derleme (Build from Source)
+## 🛠️ Building from Source
 
-IsuDeck'i yerel ortamınızda derlemek için aşağıdaki gereksinimlerin yüklü olması gerekir:
-- [Node.js](https://nodejs.org/) (v18+)
-- [Rust & Cargo](https://rustup.rs/) (v1.75+)
-- Visual Studio C++ Build Tools
+### Prerequisites
+- **OS:** Windows 10 / 11 (64-bit)
+- **Rust:** `rustup default stable-x86_64-pc-windows-msvc`
+- **Node.js:** v18+ or v20+ with `npm`
+- **C++ Tools:** Visual Studio 2022 C++ Build Tools
 
-### Adımlar:
-
+### Build Instructions
 ```bash
-# 1. Repoyu klonlayın
-git clone https://github.com/your-username/IsuDeck.git
+# 1. Clone repository
+git clone https://github.com/muzmahil/IsuDeck.git
 cd IsuDeck
 
-# 2. Arayüz bağımlılıklarını yükleyin
+# 2. Install frontend dependencies
 cd isu-deck-ui
 npm install
 
-# 3. Geliştirme modunda çalıştırın
-npm run tauri dev
-
-# 4. Dağıtım için release ikilisini derleyin
+# 3. Build Next.js frontend
 npm run build
-npm run tauri build
-```
 
-Derlenen tek parça `.exe` dosyası `isu-deck-ui/src-tauri/target/release/app.exe` konumunda oluşur.
-
----
-
-## 📂 Proje Dizin Yapısı
-
-```text
-IsuDeck/
-├── IsuDeck.exe            # Ana taşınabilir uygulama
-├── interception.dll       # Düşük seviyeli klavye filtre kütüphanesi
-├── drivers/               # Interception kernel filtre sürücüsü yükleyicisi
-├── plugins/               # Kullanıma hazır eklentiler (IsuDeck.OBSPlugin vb.)
-├── plugins-source/        # Dahili eklentilerin kaynak kodları (Rust/C#)
-├── sounds/                # Dahili mekanik ve klik ses efektleri
-├── website/               # Tanıtım ve dokümantasyon web sitesi (HTML/CSS/JS)
-├── isu-deck-ui/           # Ana uygulama kaynak kodları
-│   ├── app/               # Next.js 16 kullanıcı arayüzü & bileşenler
-│   └── src-tauri/         # Rust backend, donanım yöneticisi & eklenti motoru
-├── PLUGIN_SDK.md          # Eklenti geliştiricileri için detaylı SDK rehberi
-└── README.md              # Bu belge
+# 4. Build Rust backend
+cd src-tauri
+cargo build --release
 ```
 
 ---
 
-## 🛡️ Güvenlik & Şeffaflık (Security & Trust)
+## 📚 Documentation
 
-IsuDeck, klavyeleri donanım kimlikleriyle ayırabilmek için açık kaynaklı [Interception](https://github.com/oblitum/Interception) sürücüsünü kullanır.
-- IsuDeck bir keylogger **değildir**.
-- Yalnızca sizin IsuDeck üzerinde **özellikle atadığınız** ikincil klavye tuşlarını dinler.
-- İnternete hiçbir kullanıcı verisi, tuş kaydı veya telemetri göndermez.
-- Tüm kaynak kodlar herkese açık, denetlenebilir ve şeffaftır.
-
----
-
-## 🤝 Katkıda Bulunma (Contributing)
-
-Katkılarınızı memnuniyetle kabul ediyoruz!
-1. Bu depoyu çatallayın (Fork).
-2. Yeni bir özellik dalı oluşturun (`git checkout -b feature/harika-ozellik`).
-3. Değişikliklerinizi kaydedin (`git commit -m 'feat: Harika özellik eklendi'`).
-4. Dalınızı gönderin (`git push origin feature/harika-ozellik`).
-5. Bir Çekme İsteği (Pull Request) açın.
+- 📖 **[USER_GUIDE.md](./USER_GUIDE.md)** — Comprehensive user guide, macro logic, dynamic variables, and troubleshooting.
+- 🔌 **[PLUGIN_SDK.md](./PLUGIN_SDK.md)** — Developer guide and JSON-RPC specification for writing custom plugins.
+- 🤝 **[CONTRIBUTING.md](./CONTRIBUTING.md)** — Guidelines for contributing code, features, and plugins.
+- ⚖️ **[LICENSE.md](./LICENSE.md)** — Full GNU General Public License v3 legal text.
 
 ---
 
-## 📄 Lisans (License)
+## 📄 License & Attribution
 
-**IsuDeck by rootcf**
+**IsuDeck by rootcf**  
+Copyright (C) 2026 rootcf.  
+This program is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public License v3** as published by the Free Software Foundation.
 
-Bu proje **GNU Genel Kamu Lisansı v3 (GNU GPL v3)** kapsamında lisanslanmıştır. Telif Hakkı (C) 2026 rootcf.
-
-Tüm lisans şartları ve yasal haklarınız için [LICENSE.md](./LICENSE.md) dosyasını inceleyebilirsiniz.
+See the [LICENSE.md](./LICENSE.md) file for details.

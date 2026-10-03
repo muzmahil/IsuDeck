@@ -1,11 +1,11 @@
-# IsuDeck Şablon Eklentisi (Template Plugin)
+# IsuDeck Template Plugin
 
-Bu klasör, IsuDeck için özel eklenti (plugin) geliştirmek isteyen geliştiriciler için hazırlanmış standart şablon projesidir.
+This folder serves as a starter template for developers creating custom plugins for IsuDeck.
 
-## Klasör Yapısı
-- `plugin.json`: Eklenti kimliği, ayarları ve sunduğu buton aksiyonlarının tanımlandığı ana bildirim (manifest) dosyası.
-- `config.json`: Kullanıcının arayüzden girdiği bağlantı/yapılandırma değerlerini tutan dosya.
-- `icon.svg`: Eklentinin mağazada ve butonlarda görünecek ikonu.
-- `README.md`: Eklenti tanıtım dokümanı.
+## Directory Structure
+- `plugin.json`: Primary manifest defining plugin identity, daemon mode, configuration schema, and key actions.
+- `config.json`: Persistent user configuration generated via the IsuDeck settings UI.
+- `icon.svg`: Vector icon displayed in the plugin manager and button editor.
+- `README.md`: Plugin documentation and usage instructions.
 
-Detaylı geliştirici kılavuzu için ana dizindeki `PLUGIN_SDK.md` dosyasını inceleyebilirsiniz.
+For the comprehensive plugin development guide and JSON-RPC stdio protocol details, see [PLUGIN_SDK.md](../../PLUGIN_SDK.md).

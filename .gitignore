@@ -46,11 +46,15 @@ yarn-debug.log*
 yarn-error.log*
 
 # --- Built Binaries ---
-# Derlenen uygulama binary'leri (GitHub Releases üzerinden dağıtılır)
+# Derlenen uygulama binary'leri ve arşivleri (GitHub Releases üzerinden dağıtılır)
 IsuDeck.exe
 *.pdb
 *.ilk
 *.exp
+release_package/
+*.zip
+*.tar.gz
+*.7z
 
 # Ancak sürücü yükleyici ve kütüphanesini repoda tut:
 !drivers/install-interception.exe
