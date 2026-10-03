@@ -94,10 +94,11 @@ export default function SplashScreen({ onReady }) {
             </div>
           </div>
 
-          <h1 className="text-3xl font-bold tracking-tight mb-2">
+          <h1 className="text-3xl font-bold tracking-tight mb-1">
             Isu<span style={{ color: accentColor }}>Deck</span>
           </h1>
-          <p className="text-zinc-500 text-sm font-medium mb-8">v1.0.0-alpha</p>
+          <p className="text-zinc-400 text-xs font-medium">v1.0.0</p>
+          <p className="text-zinc-500 text-[11px] font-medium mb-8">IsuDeck by rootcf • GNU GPL v3</p>
 
           {/* Progress Bar */}
           <div className="w-64 h-1.5 bg-zinc-800/40 rounded-full overflow-hidden mb-4 border border-white/5">

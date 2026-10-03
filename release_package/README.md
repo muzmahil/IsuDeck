@@ -10,14 +10,14 @@
   <img src="https://img.shields.io/badge/Built%20With-Tauri%20v2%20%2B%20Rust-orange?style=flat-square" alt="Rust Tauri">
   <img src="https://img.shields.io/badge/Frontend-Next.js%2016%20(React)-black?style=flat-square" alt="Next.js">
   <img src="https://img.shields.io/badge/RAM%20Usage-%3C%2040%20MB-emerald?style=flat-square" alt="RAM Usage">
-  <img src="https://img.shields.io/badge/License-MIT-purple?style=flat-square" alt="License">
+  <img src="https://img.shields.io/badge/License-GPL--3.0-purple?style=flat-square" alt="License">
 </p>
 
 ---
 
 ## 💡 IsuDeck Nedir? (What is IsuDeck?)
 
-**IsuDeck**, masanızda veya çekmecenizde duran ikinci bir USB klavyeyi ya da harici bir numpad'i, ana klavyenizden **tamamen bağımsız çalışan** profesyonel bir kontrol konsoluna (Sanal Stream Deck) dönüştüren açık kaynaklı bir masaüstü uygulamasıdır.
+**IsuDeck by rootcf**, masanızda veya çekmecenizde duran ikinci bir USB klavyeyi ya da harici bir numpad'i, ana klavyenizden **tamamen bağımsız çalışan** profesyonel bir kontrol konsoluna (Sanal Stream Deck) dönüştüren açık kaynaklı bir masaüstü uygulamasıdır.
 
 Piyasadaki özel donanım konsolları binlerce liraya mal olurken, IsuDeck halihazırda sahip olduğunuz donanımları değerlendirmenizi sağlar.
 
@@ -61,7 +61,7 @@ Windows standart olarak iki klavyeyi tek bir cihaz gibi algılar. İkinci klavye
 | **Kullanılabilir Tuş Sayısı** | 6 / 15 / 32 tuş (Sabit) | **104+ tuş** (Tam boy klavye) |
 | **Sistem Bellek Kullanımı** | 200 – 600 MB RAM | **< 40 MB RAM** (Rust) |
 | **Klavyeyi İzole Etme** | Yok (Özel donanım şart) | **Var** (Kernel Sürücüsü ile) |
-| **Yazılım Lisansı** | Kapalı / Tescilli | **Açık Kaynak (MIT)** |
+| **Yazılım Lisansı** | Kapalı / Tescilli | **Özgür ve Açık Kaynak (GNU GPL v3)** |
 
 ---
 
@@ -166,4 +166,8 @@ Katkılarınızı memnuniyetle kabul ediyoruz!
 
 ## 📄 Lisans (License)
 
-Bu proje [MIT Lisansı](./LICENSE) kapsamında lisanslanmıştır. Dilediğiniz gibi kullanabilir, değiştirebilir ve geliştirebilirsiniz.
+**IsuDeck by rootcf**
+
+Bu proje **GNU Genel Kamu Lisansı v3 (GNU GPL v3)** kapsamında lisanslanmıştır. Telif Hakkı (C) 2026 rootcf.
+
+Tüm lisans şartları ve yasal haklarınız için [LICENSE.md](./LICENSE.md) dosyasını inceleyebilirsiniz.

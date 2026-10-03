@@ -131,4 +131,12 @@ Bilgisayar yüksek CPU yükü altındayken veya ağır oyunlar oynanırken tuş 
 2. Şifre belirlediyseniz IsuDeck Eklentiler sayfasında OBS Studio ayarlarından şifreyi girip kaydedin.
 
 ---
-*IsuDeck — Özgür, Açık Kaynaklı ve Güçlü Sanal Stream Deck Çözümü.*
+
+## 9. Lisans ve Telif Hakkı (License & Copyright)
+
+**IsuDeck by rootcf**  
+Telif Hakkı (C) 2026 rootcf.  
+Bu yazılım **GNU Genel Kamu Lisansı v3 (GNU GPL v3)** kapsamında lisanslanmıştır. Kullanım ve dağıtım koşulları için [LICENSE.md](./LICENSE.md) belgesini inceleyebilirsiniz.
+
+---
+*IsuDeck by rootcf — Özgür, Açık Kaynaklı ve Güçlü Sanal Stream Deck Çözümü.*

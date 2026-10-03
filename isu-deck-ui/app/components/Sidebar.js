@@ -87,9 +87,12 @@ export default function Sidebar() {
             <div className="w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300" style={{ boxShadow: `0 0 16px ${accentColor}45` }}>
               <img src="/isudeck_logo.png" alt="IsuDeck Logo" className="w-8 h-8 rounded-lg logo-img" />
             </div>
-            <h1 className="hidden lg:block text-xl font-bold tracking-tight text-white">
-              Isu<span style={{ color: accentColor }}>Deck</span>
-            </h1>
+            <div className="hidden lg:flex flex-col">
+              <h1 className="text-xl font-bold tracking-tight text-white leading-none">
+                Isu<span style={{ color: accentColor }}>Deck</span>
+              </h1>
+              <span className="text-[10px] text-zinc-500 font-medium mt-1">by rootcf</span>
+            </div>
           </div>
         </div>
 

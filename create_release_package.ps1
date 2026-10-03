@@ -19,6 +19,7 @@ New-Item -ItemType Directory -Path $OutputDir | Out-Null
 Copy-Item -Path (Join-Path $ProjectRoot "IsuDeck.exe") -Destination $OutputDir -Force
 Copy-Item -Path (Join-Path $ProjectRoot "interception.dll") -Destination $OutputDir -Force
 Copy-Item -Path (Join-Path $ProjectRoot "LICENSE") -Destination $OutputDir -Force
+Copy-Item -Path (Join-Path $ProjectRoot "LICENSE.md") -Destination $OutputDir -Force
 Copy-Item -Path (Join-Path $ProjectRoot "README.md") -Destination $OutputDir -Force
 Copy-Item -Path (Join-Path $ProjectRoot "KULLANIM_KILAVUZU.md") -Destination $OutputDir -Force
 Copy-Item -Path (Join-Path $ProjectRoot "USER_GUIDE.md") -Destination $OutputDir -Force

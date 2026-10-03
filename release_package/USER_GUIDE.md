@@ -131,4 +131,12 @@ To guarantee instantaneous key response under heavy CPU loads or gaming:
 2. If password authentication is enabled, enter your password in the IsuDeck Plugins configuration panel.
 
 ---
-*IsuDeck — Open Source, Driver-Isolated Virtual Stream Deck.*
+
+## 9. License & Copyright
+
+**IsuDeck by rootcf**  
+Copyright (C) 2026 rootcf.  
+This software is licensed under the **GNU General Public License v3 (GNU GPL v3)**. For full terms and conditions, refer to [LICENSE.md](./LICENSE.md).
+
+---
+*IsuDeck by rootcf — Open Source, Driver-Isolated Virtual Stream Deck.*

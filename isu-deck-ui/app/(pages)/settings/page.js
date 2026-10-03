@@ -23,6 +23,7 @@ export default function SettingsPage() {
     action: 'install',
     errorMessage: ''
   });
+  const [licenseModalOpen, setLicenseModalOpen] = useState(false);
   const [soundList, setSoundList] = useState(customSounds || ['click.wav', 'mech.wav', 'beep.wav']);
   const bgFileInputRef = useRef(null);
   const accentColor = settings?.accentColor || '#3b82f6';
@@ -572,16 +573,29 @@ export default function SettingsPage() {
         <div className="bg-[#181818] border border-white/5 rounded-xl p-5 space-y-4">
           <div className="flex items-center justify-between border-b border-white/5 pb-3">
             <div>
-              <h2 className="text-sm font-semibold text-white">
-                {language === 'tr' ? 'Hakkında & Lisanslar' : 'About & Licenses'}
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-white">
+                  {language === 'tr' ? 'Hakkında & Lisans' : 'About & License'}
+                </h2>
+                <span className="text-[11px] text-zinc-400 font-medium bg-white/5 px-2 py-0.5 rounded border border-white/5">
+                  IsuDeck by rootcf
+                </span>
+              </div>
               <p className="text-xs text-zinc-500 mt-0.5">
                 IsuDeck Core v1.0.0
               </p>
             </div>
-            <span className="px-2.5 py-1 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-bold">
-              MIT License
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-1 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-bold">
+                GNU GPL v3
+              </span>
+              <button
+                onClick={() => setLicenseModalOpen(true)}
+                className="px-3 py-1 rounded bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white text-xs font-medium border border-white/10 transition-colors cursor-pointer"
+              >
+                {language === 'tr' ? 'Lisansı İncele' : 'View License'}
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
@@ -589,13 +603,13 @@ export default function SettingsPage() {
               <div className="flex items-center gap-2">
                 <svg className="w-4 h-4 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                 <span className="text-xs font-bold text-white">
-                  {language === 'tr' ? 'Açık Kaynak & Yerel Güvenlik' : 'Open Source & Local Security'}
+                  {language === 'tr' ? 'GNU Genel Kamu Lisansı v3' : 'GNU General Public License v3'}
                 </span>
               </div>
               <p className="text-[11px] text-zinc-400 leading-relaxed">
                 {language === 'tr'
-                  ? 'IsuDeck tamamen yerel çalışan, açık kaynak kodlu bir yazılımdır. Telemetri veya arka plan veri toplaması yapmaz.'
-                  : 'IsuDeck is 100% locally executed open-source software with zero telemetry or background data collection.'}
+                  ? 'IsuDeck by rootcf, GNU GPL v3 kapsamında korunan özgür ve açık kaynaklı bir yazılımdır. Telif Hakkı (C) 2026 rootcf.'
+                  : 'IsuDeck by rootcf is free and open-source software protected under the GNU GPL v3. Copyright (C) 2026 rootcf.'}
               </p>
             </div>
 
@@ -603,13 +617,13 @@ export default function SettingsPage() {
               <div className="flex items-center gap-2">
                 <svg className="w-4 h-4 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="13.5" cy="6.5" r=".5"/><circle cx="17.5" cy="10.5" r=".5"/><circle cx="8.5" cy="7.5" r=".5"/><circle cx="6.5" cy="12.5" r=".5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
                 <span className="text-xs font-bold text-white">
-                  {language === 'tr' ? 'Lucide İkon Paketi' : 'Lucide Icon Pack'}
+                  {language === 'tr' ? 'Açık Kaynak Bileşenler' : 'Open Source Components'}
                 </span>
               </div>
               <p className="text-[11px] text-zinc-400 leading-relaxed">
                 {language === 'tr'
-                  ? 'Vektör simgeler Lucide Icons projesinden entegre edilmiştir (MIT Lisansı ile korunmaktadır).'
-                  : 'Vector icon assets provided by Lucide Icons (Licensed under the MIT License).'}
+                  ? 'Vektör simgeler Lucide Icons (MIT) projesinden, çekirdek girdi yakalama Interception kütüphanesinden sağlanmaktadır.'
+                  : 'Vector icon assets provided by Lucide Icons (MIT), core input interception by Interception library.'}
               </p>
             </div>
           </div>
@@ -696,6 +710,71 @@ export default function SettingsPage() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* LİSANS İNCELEME MODALI */}
+      {licenseModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-[#181818] border border-white/10 rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl relative">
+            <div className="p-5 border-b border-white/10 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <span>GNU General Public License v3.0</span>
+                  <span className="px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-mono font-bold">GPL-3.0</span>
+                </h3>
+                <p className="text-xs text-zinc-400 mt-1">
+                  IsuDeck by rootcf • Copyright (C) 2026 rootcf
+                </p>
+              </div>
+              <button
+                onClick={() => setLicenseModalOpen(false)}
+                className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                title={language === 'tr' ? 'Kapat' : 'Close'}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto font-mono text-[11px] leading-relaxed text-zinc-300 space-y-4 select-text bg-[#121212] m-2 rounded-xl border border-white/5">
+              <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg text-blue-300 text-xs font-sans">
+                <strong>{language === 'tr' ? 'Özet Bildirim:' : 'Summary Notice:'}</strong> {language === 'tr'
+                  ? 'IsuDeck, rootcf tarafından geliştirilen özgür bir yazılımdır. GNU Genel Kamu Lisansı v3 koşulları altında kopyalayabilir, değiştirebilir ve dağıtabilirsiniz.'
+                  : 'IsuDeck is free software created by rootcf. You can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or any later version.'}
+              </div>
+
+              <div>
+                <h4 className="font-bold text-white mb-1">Copyright (C) 2026 rootcf</h4>
+                <p className="text-zinc-400">IsuDeck by rootcf</p>
+              </div>
+
+              <div className="space-y-2 border-t border-white/10 pt-3">
+                <p>This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.</p>
+                <p>This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.</p>
+                <p>You should have received a copy of the GNU General Public License along with this program. If not, see &lt;https://www.gnu.org/licenses/&gt;.</p>
+              </div>
+
+              <div className="border-t border-white/10 pt-3 text-zinc-400">
+                <h4 className="font-bold text-zinc-200 mb-1">Third-Party & Included Components</h4>
+                <ul className="list-disc pl-4 space-y-1">
+                  <li><strong>Tauri Framework:</strong> Licensed under MIT / Apache-2.0.</li>
+                  <li><strong>Next.js & React:</strong> Licensed under MIT License.</li>
+                  <li><strong>Lucide Icons:</strong> Licensed under MIT License (Lucide Contributors).</li>
+                  <li><strong>Interception Library & Driver:</strong> Licensed under MIT License by Francisco Lopes.</li>
+                  <li><strong>OBS WebSocket Plugin:</strong> Licensed under MIT License.</li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-white/10 flex justify-end">
+              <button
+                onClick={() => setLicenseModalOpen(false)}
+                className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition-colors cursor-pointer"
+              >
+                {language === 'tr' ? 'Anladım' : 'Close'}
+              </button>
+            </div>
           </div>
         </div>
       )}
