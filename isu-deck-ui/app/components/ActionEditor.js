@@ -321,7 +321,7 @@ const STATIC_ACTION_TYPES = {
     label: 'action_types.IF_CONDITION.label',
     category: 'action_types.categories.logic',
     isBlock: true,
-    icon: <svg className="w-5 h-5 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" x2="21" y1="20" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" x2="21" y1="15" y2="21"/><line x1="4" x2="9" y1="4" y2="9"/></svg>,
+    icon: <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" x2="21" y1="20" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" x2="21" y1="15" y2="21"/><line x1="4" x2="9" y1="4" y2="9"/></svg>,
     default: { leftOperand: 'vol', operator: '==', rightOperand: '0', hasElse: false, thenActions: [], elseActions: [] },
     fields: [
       { key: 'leftOperand', type: 'text', label: 'action_types.IF_CONDITION.variable', placeholder: 'vol or $sys.cpu', required: true },
@@ -343,7 +343,7 @@ const STATIC_ACTION_TYPES = {
     label: 'action_types.LOOP_REPEAT.label',
     category: 'action_types.categories.logic',
     isBlock: true,
-    icon: <svg className="w-5 h-5 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>,
+    icon: <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>,
     default: { count: 3, delay: 100, loopActions: [] },
     fields: [
       { key: 'count', type: 'number', min: 1, max: 100, label: 'action_types.LOOP_REPEAT.count', placeholder: '3', width: 'w-24', required: true },
@@ -939,11 +939,16 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
 
   const handleDragStartCatalog = (e, typeKey) => {
     try {
-      e.dataTransfer.setData('application/json', JSON.stringify({
+      const payload = JSON.stringify({
         source: 'catalog',
         typeKey
-      }));
-      e.dataTransfer.effectAllowed = 'copy';
+      });
+      e.dataTransfer.setData('text/plain', payload);
+      e.dataTransfer.setData('application/json', payload);
+      e.dataTransfer.effectAllowed = 'copyMove';
+      if (typeof window !== 'undefined') {
+        window.__isudeck_drag = { source: 'catalog', typeKey };
+      }
       setDraggingAction({ source: 'catalog', typeKey });
     } catch (err) {
       console.error('Drag start error:', err);
@@ -952,14 +957,19 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
 
   const handleDragStartExisting = (e, actionId, parentId = null, listKey = null, index = 0) => {
     try {
-      e.dataTransfer.setData('application/json', JSON.stringify({
+      const payload = JSON.stringify({
         source: 'existing',
         actionId,
         parentId,
         listKey,
         index
-      }));
-      e.dataTransfer.effectAllowed = 'move';
+      });
+      e.dataTransfer.setData('text/plain', payload);
+      e.dataTransfer.setData('application/json', payload);
+      e.dataTransfer.effectAllowed = 'copyMove';
+      if (typeof window !== 'undefined') {
+        window.__isudeck_drag = { source: 'existing', actionId, parentId, listKey, index };
+      }
       setDraggingAction({ source: 'existing', actionId, parentId, listKey, index });
     } catch (err) {
       console.error('Drag start existing error:', err);
@@ -969,17 +979,32 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
   const handleDragEnd = () => {
     setActiveDropTarget(null);
     setDraggingAction(null);
+    if (typeof window !== 'undefined') {
+      window.__isudeck_drag = null;
+    }
+  };
+
+  const getDroppedData = (e) => {
+    try {
+      const text = e.dataTransfer?.getData('text/plain') || e.dataTransfer?.getData('application/json');
+      if (text) {
+        return JSON.parse(text);
+      }
+    } catch (err) {}
+    if (typeof window !== 'undefined' && window.__isudeck_drag) {
+      return window.__isudeck_drag;
+    }
+    return null;
   };
 
   const handleDropOnMain = (e) => {
     e.preventDefault();
-    setActiveDropTarget(null);
-    setDraggingAction(null);
-    try {
-      const rawData = e.dataTransfer.getData('application/json');
-      if (!rawData) return;
-      const data = JSON.parse(rawData);
+    e.stopPropagation();
+    const data = getDroppedData(e);
+    handleDragEnd();
+    if (!data) return;
 
+    try {
       if (data.source === 'catalog') {
         addAction(data.typeKey);
       } else if (data.source === 'existing' && data.parentId && data.listKey) {
@@ -1001,14 +1026,11 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
   const handleDropOnSlot = (e, parentId, listKey) => {
     e.preventDefault();
     e.stopPropagation();
-    setActiveDropTarget(null);
-    setDraggingAction(null);
+    const data = getDroppedData(e);
+    handleDragEnd();
+    if (!data) return;
 
     try {
-      const rawData = e.dataTransfer.getData('application/json');
-      if (!rawData) return;
-      const data = JSON.parse(rawData);
-
       if (data.source === 'catalog') {
         const def = ACTION_TYPES[data.typeKey];
         if (!def || def.isBlock) return; // Prevent nesting blocks inside blocks
@@ -1358,31 +1380,16 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
     );
   };
 
-  const renderNestedSlot = (parentAct, listKey, title, theme) => {
+  const renderNestedSlot = (parentAct, listKey, theme) => {
     const subList = Array.isArray(parentAct[listKey]) ? parentAct[listKey] : [];
     const targetKey = `${parentAct.id}_${listKey}`;
     const isHovered = activeDropTarget === targetKey;
 
     return (
-      <div className={`mt-3 pl-3 py-1 pr-1 border-l-2 ${theme.borderColor} bg-black/20 rounded-r-2xl transition-all duration-200`}>
-        {/* Slot Header */}
-        <div className="flex items-center justify-between py-1.5 px-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase ${theme.badgeBg} ${theme.badgeText}`}>
-              {listKey === 'thenActions' ? t('action_types.IF_CONDITION.is_met', language) : listKey === 'elseActions' ? t('action_types.IF_CONDITION.is_not_met', language) : t('action_types.LOOP_REPEAT.loop_keyword', language)}
-            </span>
-            <span className="text-xs font-semibold text-zinc-300 truncate">
-              {title}
-            </span>
-          </div>
-          <span className="text-[10px] text-zinc-500 font-mono shrink-0 ml-2">
-            {subList.length} {language === 'tr' ? 'eylem' : 'actions'}
-          </span>
-        </div>
-
+      <div className={`pl-4 pr-3 py-2 border-l-[6px] ${theme.spineColor} ${theme.bgCavity} transition-all duration-150`}>
         {/* Sub-actions List */}
         {subList.length > 0 && (
-          <div className="space-y-2 py-1">
+          <div className="space-y-2 mb-2">
             {subList.map((subAct, subIdx) => {
               const subDef = ACTION_TYPES[subAct.definitionId] || ACTION_TYPES[subAct.type];
               return (
@@ -1391,11 +1398,11 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                   draggable={true}
                   onDragStart={(e) => handleDragStartExisting(e, subAct.id, parentAct.id, listKey, subIdx)}
                   onDragEnd={handleDragEnd}
-                  className="bg-[#18181c] border border-white/10 hover:border-white/20 rounded-xl p-2.5 text-xs space-y-2 shadow-md transition-all group/sub"
+                  className="bg-[#18181c] border border-white/10 hover:border-white/20 rounded-xl p-2.5 text-xs space-y-2 shadow-sm transition-all group/sub"
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-zinc-600 hover:text-zinc-400 cursor-grab active:cursor-grabbing font-mono text-sm leading-none" title="Sürükle">
+                      <span className="text-zinc-500 hover:text-zinc-300 cursor-grab active:cursor-grabbing font-mono text-sm leading-none shrink-0" title="Sürükle">
                         ⠿
                       </span>
                       {subDef?.fields?.length > 0 && (
@@ -1411,7 +1418,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                       <span className="w-4 h-4 rounded bg-zinc-800 text-[10px] flex items-center justify-center text-zinc-400 font-mono shrink-0">
                         {subIdx + 1}
                       </span>
-                      <span className="font-medium text-zinc-200 truncate flex items-center gap-1.5">
+                      <span className="font-semibold text-zinc-200 truncate flex items-center gap-1.5">
                         {subDef?.icon && <span className="w-3.5 h-3.5 text-zinc-400 shrink-0">{subDef.icon}</span>}
                         {subDef?.isPlugin ? subAct.label : (subDef ? t(subDef.label, language) : (subAct.label || subAct.type))}
                       </span>
@@ -1462,15 +1469,17 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
           </div>
         )}
 
-        {/* Interactive Drag & Drop Target Zone */}
+        {/* Drop Target Cavity */}
         <div
           onDragOver={(e) => {
             e.preventDefault();
+            e.stopPropagation();
             e.dataTransfer.dropEffect = 'copy';
             if (activeDropTarget !== targetKey) setActiveDropTarget(targetKey);
           }}
           onDragEnter={(e) => {
             e.preventDefault();
+            e.stopPropagation();
             setActiveDropTarget(targetKey);
           }}
           onDragLeave={(e) => {
@@ -1478,23 +1487,23 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
             if (activeDropTarget === targetKey) setActiveDropTarget(null);
           }}
           onDrop={(e) => handleDropOnSlot(e, parentAct.id, listKey)}
-          className={`relative my-1.5 p-3 rounded-xl border-2 border-dashed transition-all duration-200 flex flex-col items-center justify-center gap-1.5 cursor-pointer ${
+          className={`p-3 rounded-xl border-2 border-dashed transition-all duration-200 flex flex-wrap items-center justify-between gap-2 cursor-pointer ${
             isHovered
-              ? `${theme.bgActive} ${theme.borderHover} shadow-[0_0_20px_${theme.glowColor}] scale-[1.01]`
-              : 'border-white/10 hover:border-white/20 bg-white/[0.02] hover:bg-white/[0.04]'
+              ? `${theme.bgActive} ${theme.borderHover} shadow-[0_0_25px_${theme.glowColor}] scale-[1.01]`
+              : 'border-white/15 hover:border-white/25 bg-black/30 hover:bg-black/40'
           }`}
         >
           <div className="flex items-center gap-2 text-xs font-medium pointer-events-none">
-            <svg className={`w-4 h-4 transition-transform ${isHovered ? 'scale-125 animate-bounce text-white' : 'text-zinc-500'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg className={`w-4 h-4 transition-transform ${isHovered ? 'scale-125 animate-bounce text-white' : 'text-zinc-400'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M8 21h8"/>
             </svg>
-            <span className={isHovered ? 'text-white font-bold' : 'text-zinc-400'}>
+            <span className={isHovered ? 'text-white font-bold' : 'text-zinc-300'}>
               {isHovered ? t('action_types.IF_CONDITION.drop_zone_hover', language) : (subList.length === 0 ? theme.emptyHint : t('action_types.IF_CONDITION.drag_hint', language))}
             </span>
           </div>
 
-          {/* Quick-Add Option */}
-          <div className="relative mt-0.5">
+          {/* Quick-Add Dropdown right inside slot */}
+          <div className="relative">
             <select
               value=""
               onChange={(e) => {
@@ -1502,7 +1511,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                   addNestedAction(parentAct.id, listKey, e.target.value);
                 }
               }}
-              className="bg-black/50 hover:bg-black/80 border border-white/10 rounded-lg px-2.5 py-1 text-[11px] text-zinc-400 hover:text-white outline-none transition-all cursor-pointer appearance-none pr-6"
+              className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white border border-white/10 rounded-lg px-2.5 py-1 text-xs font-medium outline-none transition-all cursor-pointer appearance-none pr-6"
             >
               <option value="" disabled>{t('action_types.IF_CONDITION.quick_add', language)}</option>
               {Object.entries(getGroupedActions()).map(([cat, acts]) => {
@@ -1519,8 +1528,8 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                 );
               })}
             </select>
-            <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-500">
-              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg>
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-400">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg>
             </div>
           </div>
         </div>
@@ -2101,19 +2110,22 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                         {!collapsedCategories[category] && (
                           <div className="flex flex-col gap-1.5 animate-in slide-in-from-top-1 duration-200">
                             {categoryActions.map((type) => (
-                              <button
+                              <div
                                 key={type.typeKey}
                                 draggable={true}
                                 onDragStart={(e) => handleDragStartCatalog(e, type.typeKey)}
                                 onDragEnd={handleDragEnd}
                                 onClick={() => addAction(type.typeKey)}
-                                className="flex items-center justify-between p-2.5 bg-[#141416] border border-white/5 rounded-xl hover:border-blue-500/40 hover:bg-[#1a1a1f] hover:shadow-md transition-all text-left group/btn cursor-grab active:cursor-grabbing"
+                                role="button"
+                                tabIndex={0}
+                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); addAction(type.typeKey); } }}
+                                className="flex items-center justify-between p-2.5 bg-[#141416] border border-white/5 rounded-xl hover:border-blue-500/40 hover:bg-[#1a1a1f] hover:shadow-md transition-all text-left group/btn cursor-grab active:cursor-grabbing select-none"
                               >
-                                <div className="flex items-center gap-2.5 min-w-0">
-                                  <span className="text-zinc-600 group-hover/btn:text-zinc-400 font-mono text-xs leading-none shrink-0" title="Sürükle">
+                                <div className="flex items-center gap-2.5 min-w-0 pointer-events-none">
+                                  <span className="text-zinc-500 group-hover/btn:text-zinc-300 font-mono text-sm leading-none shrink-0" title="Sürükle">
                                     ⠿
                                   </span>
-                                  <div className="w-8 h-8 rounded-lg bg-zinc-800/70 flex items-center justify-center text-lg shrink-0 group-hover/btn:bg-blue-600/20 group-hover/btn:scale-105 transition-all">
+                                  <div className="w-8 h-8 rounded-lg bg-zinc-800/70 flex items-center justify-center text-lg shrink-0 group-hover/btn:bg-blue-600/20 group-hover/btn:scale-105 transition-all text-white">
                                     {type.icon}
                                   </div>
                                   <div className="truncate">
@@ -2125,10 +2137,15 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                     </div>
                                   </div>
                                 </div>
-                                <div className="w-6 h-6 rounded-md bg-white/5 group-hover/btn:bg-blue-600 text-zinc-500 group-hover/btn:text-white flex items-center justify-center shrink-0 transition-all ml-2">
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); addAction(type.typeKey); }}
+                                  className="w-6 h-6 rounded-md bg-white/5 hover:bg-blue-600 text-zinc-500 hover:text-white flex items-center justify-center shrink-0 transition-all ml-2 cursor-pointer"
+                                  title={language === 'tr' ? 'Listeye Ekle' : 'Add to List'}
+                                >
                                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                                </div>
-                              </button>
+                                </button>
+                              </div>
                             ))}
                           </div>
                         )}
@@ -2232,30 +2249,260 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                           );
                         }
 
+                        if (actionDef.isBlock && act.definitionId === 'IF_CONDITION') {
+                          return (
+                            <div
+                              key={act.id}
+                              draggable={true}
+                              onDragStart={(e) => handleDragStartExisting(e, act.id, null, null, idx)}
+                              onDragEnd={handleDragEnd}
+                              className="flex flex-col rounded-2xl overflow-hidden border-2 border-amber-500/70 bg-[#151518] shadow-lg transition-all group"
+                            >
+                              {/* ÜST KOL (TOP SHOULDER OF C-HOOK) */}
+                              <div className="bg-[#1c1a16] border-b-2 border-amber-500/60 p-2.5 sm:p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+                                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                  <span className="text-zinc-500 group-hover:text-zinc-300 cursor-grab active:cursor-grabbing font-mono text-sm leading-none shrink-0" title="Sürükle">
+                                    ⠿
+                                  </span>
+                                  <span className="w-5 h-5 rounded bg-amber-500/20 text-amber-300 text-xs flex items-center justify-center font-bold">
+                                    {idx + 1}
+                                  </span>
+                                  <span className="px-2.5 py-1 rounded-lg bg-amber-500 text-black font-black tracking-wider text-xs uppercase shadow-sm">
+                                    {t('action_types.IF_CONDITION.if_keyword', language)}
+                                  </span>
+
+                                  {/* Değişken Girişi */}
+                                  <div className="flex items-center bg-[#121214] border border-amber-500/30 rounded-lg px-2.5 py-1 focus-within:border-amber-400 shadow-inner">
+                                    <span className="text-amber-400 mr-1 text-[11px] font-mono font-bold">$</span>
+                                    <input
+                                      type="text"
+                                      value={act.leftOperand || ''}
+                                      onChange={(e) => updateAction(act.id, 'leftOperand', e.target.value)}
+                                      placeholder="vol"
+                                      className="bg-transparent text-white outline-none w-20 sm:w-24 text-xs font-mono font-semibold"
+                                    />
+                                  </div>
+
+                                  {/* Koşul Operatörü */}
+                                  <div className="relative">
+                                    <select
+                                      value={act.operator || '=='}
+                                      onChange={(e) => updateAction(act.id, 'operator', e.target.value)}
+                                      className="bg-[#121214] border border-amber-500/30 hover:border-amber-400 rounded-lg px-2.5 py-1 text-xs text-amber-300 font-bold outline-none cursor-pointer appearance-none pr-6 shadow-inner"
+                                    >
+                                      {[
+                                        { value: '==', labelKey: 'action_types.operators.eq' },
+                                        { value: '!=', labelKey: 'action_types.operators.neq' },
+                                        { value: '>', labelKey: 'action_types.operators.gt' },
+                                        { value: '<', labelKey: 'action_types.operators.lt' },
+                                        { value: '>=', labelKey: 'action_types.operators.gte' },
+                                        { value: '<=', labelKey: 'action_types.operators.lte' },
+                                        { value: 'contains', labelKey: 'action_types.operators.contains' }
+                                      ].map(opt => (
+                                        <option key={opt.value} value={opt.value}>
+                                          {t(opt.labelKey, language)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <div className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-amber-400">
+                                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg>
+                                    </div>
+                                  </div>
+
+                                  {/* Karşılaştırma Değeri */}
+                                  <div className="flex items-center bg-[#121214] border border-amber-500/30 rounded-lg px-2.5 py-1 focus-within:border-amber-400 shadow-inner">
+                                    <input
+                                      type="text"
+                                      value={act.rightOperand || ''}
+                                      onChange={(e) => updateAction(act.id, 'rightOperand', e.target.value)}
+                                      placeholder="0"
+                                      className="bg-transparent text-white outline-none w-16 sm:w-20 text-xs font-mono font-semibold"
+                                    />
+                                  </div>
+
+                                  <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 font-bold text-xs uppercase tracking-wide">
+                                    {t('action_types.IF_CONDITION.then_keyword', language)}
+                                  </span>
+                                </div>
+
+                                {/* Sağ Kontroller */}
+                                <div className="flex items-center gap-1 ml-auto">
+                                  <button
+                                    type="button"
+                                    onClick={() => updateAction(act.id, 'hasElse', !act.hasElse)}
+                                    className={`px-2 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                                      act.hasElse
+                                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                                        : 'bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white border border-white/5'
+                                    }`}
+                                  >
+                                    {act.hasElse ? t('action_types.IF_CONDITION.remove_else', language) : t('action_types.IF_CONDITION.enable_else', language)}
+                                  </button>
+                                  <button onClick={() => moveActionUp(idx)} disabled={idx === 0} className="p-1 text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m18 15-6-6-6 6" /></svg></button>
+                                  <button onClick={() => moveActionDown(idx)} disabled={idx === actions.length - 1} className="p-1 text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg></button>
+                                  <button onClick={() => duplicateAction(act)} className="p-1 text-zinc-400 hover:text-blue-400 transition-colors cursor-pointer" title="Çoğalt"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg></button>
+                                  <button onClick={() => setActions(actions.filter(a => a.id !== act.id))} className="p-1 text-zinc-400 hover:text-red-400 transition-colors cursor-pointer" title="Sil"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18" /><path d="M6 6 18 18" /></svg></button>
+                                </div>
+                              </div>
+
+                              {/* BİRİNCİ KANCA AĞZI: THEN / İSE DALI */}
+                              {renderNestedSlot(act, 'thenActions', {
+                                spineColor: 'border-amber-500',
+                                bgCavity: 'bg-amber-500/[0.04]',
+                                borderHover: 'border-amber-400',
+                                bgActive: 'bg-amber-500/20',
+                                glowColor: 'rgba(245,158,11,0.3)',
+                                emptyHint: t('action_types.IF_CONDITION.empty_then', language)
+                              })}
+
+                              {/* ORTA KOL: DEĞİLSE / ELSE (varsa) */}
+                              {act.hasElse && (
+                                <>
+                                  <div className="bg-[#1c1a16] border-y-2 border-amber-500/60 p-2 sm:p-2.5 flex items-center justify-between text-xs">
+                                    <div className="flex items-center gap-2">
+                                      <span className="px-2.5 py-1 rounded-lg bg-amber-500/90 text-black font-black tracking-wider text-xs uppercase shadow-sm">
+                                        {t('action_types.IF_CONDITION.else_keyword', language)}
+                                      </span>
+                                      <span className="text-zinc-400 text-xs">
+                                        ({t('action_types.IF_CONDITION.is_not_met', language)})
+                                      </span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateAction(act.id, 'hasElse', false)}
+                                      className="text-[11px] text-zinc-400 hover:text-red-400 transition-colors cursor-pointer"
+                                    >
+                                      {t('action_types.IF_CONDITION.remove_else', language)}
+                                    </button>
+                                  </div>
+
+                                  {/* İKİNCİ KANCA AĞZI: ELSE DALI */}
+                                  {renderNestedSlot(act, 'elseActions', {
+                                    spineColor: 'border-amber-500',
+                                    bgCavity: 'bg-amber-500/[0.03]',
+                                    borderHover: 'border-amber-400',
+                                    bgActive: 'bg-amber-500/20',
+                                    glowColor: 'rgba(245,158,11,0.3)',
+                                    emptyHint: t('action_types.IF_CONDITION.empty_else', language)
+                                  })}
+                                </>
+                              )}
+
+                              {/* ALT TABAN KAPANISI (BOTTOM CAP OF C-HOOK) */}
+                              <div className="bg-[#121214] border-t-2 border-amber-500/60 py-1.5 px-4 flex items-center justify-between text-[11px] font-mono text-amber-400/80">
+                                <span className="flex items-center gap-1.5">
+                                  <span>└──</span>
+                                  <span className="font-bold tracking-wider">{t('action_types.IF_CONDITION.end_if', language)}</span>
+                                </span>
+                                <span className="text-[10px] text-zinc-500">
+                                  {(act.thenActions?.length || 0) + (act.hasElse ? (act.elseActions?.length || 0) : 0)} {language === 'tr' ? 'alt eylem' : 'sub-actions'}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        if (actionDef.isBlock && act.definitionId === 'LOOP_REPEAT') {
+                          return (
+                            <div
+                              key={act.id}
+                              draggable={true}
+                              onDragStart={(e) => handleDragStartExisting(e, act.id, null, null, idx)}
+                              onDragEnd={handleDragEnd}
+                              className="flex flex-col rounded-2xl overflow-hidden border-2 border-blue-500/70 bg-[#13151b] shadow-lg transition-all group"
+                            >
+                              {/* ÜST KOL (TOP SHOULDER OF LOOP C-HOOK) */}
+                              <div className="bg-[#131924] border-b-2 border-blue-500/60 p-2.5 sm:p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+                                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                  <span className="text-zinc-500 group-hover:text-zinc-300 cursor-grab active:cursor-grabbing font-mono text-sm leading-none shrink-0" title="Sürükle">
+                                    ⠿
+                                  </span>
+                                  <span className="w-5 h-5 rounded bg-blue-500/20 text-blue-300 text-xs flex items-center justify-center font-bold">
+                                    {idx + 1}
+                                  </span>
+                                  <span className="px-2.5 py-1 rounded-lg bg-blue-500 text-white font-black tracking-wider text-xs uppercase shadow-sm">
+                                    {t('action_types.LOOP_REPEAT.loop_keyword', language)}
+                                  </span>
+
+                                  {/* Tekrar Sayısı */}
+                                  <div className="flex items-center bg-[#101217] border border-blue-500/30 rounded-lg px-2.5 py-1 focus-within:border-blue-400 shadow-inner">
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      max={100}
+                                      value={act.count !== undefined ? act.count : 3}
+                                      onChange={(e) => updateAction(act.id, 'count', parseInt(e.target.value) || 1)}
+                                      className="bg-transparent text-white font-bold outline-none w-10 text-xs text-center font-mono"
+                                    />
+                                    <span className="text-blue-300 text-xs font-semibold ml-1.5">{t('action_types.LOOP_REPEAT.times', language)}</span>
+                                  </div>
+
+                                  {/* Gecikme */}
+                                  <div className="flex items-center bg-[#101217] border border-blue-500/30 rounded-lg px-2.5 py-1 focus-within:border-blue-400 shadow-inner">
+                                    <span className="text-zinc-400 text-xs mr-1.5">{t('action_types.LOOP_REPEAT.delay', language)}:</span>
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      value={act.delay !== undefined ? act.delay : 100}
+                                      onChange={(e) => updateAction(act.id, 'delay', parseInt(e.target.value) || 0)}
+                                      className="bg-transparent text-white font-bold outline-none w-12 text-xs text-center font-mono"
+                                    />
+                                    <span className="text-zinc-400 text-[10px] ml-1">ms</span>
+                                  </div>
+                                </div>
+
+                                {/* Sağ Kontroller */}
+                                <div className="flex items-center gap-1 ml-auto">
+                                  <button onClick={() => moveActionUp(idx)} disabled={idx === 0} className="p-1 text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m18 15-6-6-6 6" /></svg></button>
+                                  <button onClick={() => moveActionDown(idx)} disabled={idx === actions.length - 1} className="p-1 text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg></button>
+                                  <button onClick={() => duplicateAction(act)} className="p-1 text-zinc-400 hover:text-blue-400 transition-colors cursor-pointer" title="Çoğalt"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg></button>
+                                  <button onClick={() => setActions(actions.filter(a => a.id !== act.id))} className="p-1 text-zinc-400 hover:text-red-400 transition-colors cursor-pointer" title="Sil"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18" /><path d="M6 6 18 18" /></svg></button>
+                                </div>
+                              </div>
+
+                              {/* DÖNGÜ KANCA AĞZI: LOOP ACTIONS */}
+                              {renderNestedSlot(act, 'loopActions', {
+                                spineColor: 'border-blue-500',
+                                bgCavity: 'bg-blue-500/[0.04]',
+                                borderHover: 'border-blue-400',
+                                bgActive: 'bg-blue-500/20',
+                                glowColor: 'rgba(59,130,246,0.3)',
+                                emptyHint: t('action_types.LOOP_REPEAT.empty_loop', language)
+                              })}
+
+                              {/* DÖNGÜ ALT TABAN KAPANISI */}
+                              <div className="bg-[#0e1015] border-t-2 border-blue-500/60 py-1.5 px-4 flex items-center justify-between text-[11px] font-mono text-blue-400/80">
+                                <span className="flex items-center gap-1.5">
+                                  <span>└──</span>
+                                  <span className="font-bold tracking-wider">{t('action_types.LOOP_REPEAT.end_loop', language)}</span>
+                                </span>
+                                <span className="text-[10px] text-zinc-500">
+                                  {act.loopActions?.length || 0} {language === 'tr' ? 'alt eylem' : 'sub-actions'}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        }
+
                         return (
                           <div
                             key={act.id}
                             draggable={true}
                             onDragStart={(e) => handleDragStartExisting(e, act.id, null, null, idx)}
                             onDragEnd={handleDragEnd}
-                            className={`flex flex-col p-3 bg-[#1e1e1e] border ${
-                              actionDef.isBlock
-                                ? (act.definitionId === 'IF_CONDITION' ? 'border-amber-500/30 hover:border-amber-500/60 bg-gradient-to-b from-[#1c1b18] to-[#18181a]' : 'border-blue-500/30 hover:border-blue-500/60 bg-gradient-to-b from-[#181a20] to-[#18181a]')
-                                : 'border-white/10 hover:border-white/20'
-                            } rounded-xl group transition-all shadow-md`}
+                            className="flex flex-col p-3 bg-[#1e1e1e] border border-white/10 hover:border-white/20 rounded-xl group transition-all shadow-md"
                           >
-
                             <div className="flex items-center justify-between mb-2">
                               <div className="flex items-center gap-2">
                                 <span className="text-zinc-600 group-hover:text-zinc-400 cursor-grab active:cursor-grabbing font-mono text-sm leading-none" title="Sürükle">
                                   ⠿
                                 </span>
-                                {(actionDef.fields?.length > 0 || actionDef.isBlock) && (
+                                {actionDef.fields?.length > 0 && (
                                   <button onClick={() => toggleActionExpand(act.id)} className="p-1 cursor-pointer float-left text-zinc-500 hover:text-white transition-colors" title={act.expanded ? 'Küçült' : 'Genişlet'}>
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${act.expanded ? 'rotate-180' : ''}`}><path d="m6 9 6 6 6-6" /></svg>
                                   </button>
                                 )}
-                                <span className={`w-5 h-5 rounded ${actionDef.isBlock ? (act.definitionId === 'IF_CONDITION' ? 'bg-amber-500/20 text-amber-300' : 'bg-blue-500/20 text-blue-300') : 'bg-zinc-800 text-zinc-400'} text-xs flex items-center justify-center font-bold`}>{idx + 1}</span>
+                                <span className="w-5 h-5 rounded bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center font-bold">{idx + 1}</span>
                                 <span className="text-sm font-bold text-white flex items-center gap-2">
                                   {actionDef.icon && <span className="w-4 h-4 flex items-center justify-center shrink-0">{actionDef.icon}</span>}
                                   {actionDef.isPlugin ? act.label : t(act.label, language)}
@@ -2279,164 +2526,11 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                   className="overflow-hidden"
                                 >
                                   <div className="pl-6 space-y-3">
-                                    {/* IF_CONDITION Modern Visual Builder */}
-                                    {actionDef.isBlock && act.definitionId === 'IF_CONDITION' ? (
-                                      <div className="space-y-3">
-                                        <div className="bg-[#151518] border border-white/10 rounded-xl p-3 flex flex-wrap items-center gap-2 text-xs shadow-inner">
-                                          <span className="px-2 py-1 rounded-md bg-amber-500/20 border border-amber-500/30 text-amber-400 font-bold tracking-wider">
-                                            {t('action_types.IF_CONDITION.if_keyword', language)}
-                                          </span>
-
-                                          <div className="flex items-center bg-[#1c1c20] border border-white/10 rounded-lg px-2.5 py-1 focus-within:border-amber-500/50">
-                                            <span className="text-zinc-500 mr-1 text-[11px] font-mono">$</span>
-                                            <input
-                                              type="text"
-                                              value={act.leftOperand || ''}
-                                              onChange={(e) => updateAction(act.id, 'leftOperand', e.target.value)}
-                                              placeholder="vol / $sys.cpu"
-                                              className="bg-transparent text-white outline-none w-28 text-xs font-mono"
-                                            />
-                                          </div>
-
-                                          <div className="relative">
-                                            <select
-                                              value={act.operator || '=='}
-                                              onChange={(e) => updateAction(act.id, 'operator', e.target.value)}
-                                              className="bg-[#1c1c20] border border-white/10 hover:border-white/20 rounded-lg px-2.5 py-1 text-xs text-amber-300 font-bold outline-none cursor-pointer appearance-none pr-6"
-                                            >
-                                              {[
-                                                { value: '==', labelKey: 'action_types.operators.eq' },
-                                                { value: '!=', labelKey: 'action_types.operators.neq' },
-                                                { value: '>', labelKey: 'action_types.operators.gt' },
-                                                { value: '<', labelKey: 'action_types.operators.lt' },
-                                                { value: '>=', labelKey: 'action_types.operators.gte' },
-                                                { value: '<=', labelKey: 'action_types.operators.lte' },
-                                                { value: 'contains', labelKey: 'action_types.operators.contains' }
-                                              ].map(opt => (
-                                                <option key={opt.value} value={opt.value}>
-                                                  {t(opt.labelKey, language)}
-                                                </option>
-                                              ))}
-                                            </select>
-                                            <div className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-amber-400/60">
-                                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg>
-                                            </div>
-                                          </div>
-
-                                          <div className="flex items-center bg-[#1c1c20] border border-white/10 rounded-lg px-2.5 py-1 focus-within:border-amber-500/50">
-                                            <input
-                                              type="text"
-                                              value={act.rightOperand || ''}
-                                              onChange={(e) => updateAction(act.id, 'rightOperand', e.target.value)}
-                                              placeholder="0, true, 100..."
-                                              className="bg-transparent text-white outline-none w-24 text-xs font-mono"
-                                            />
-                                          </div>
-
-                                          <button
-                                            type="button"
-                                            onClick={() => updateAction(act.id, 'hasElse', !act.hasElse)}
-                                            className={`ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium transition-all cursor-pointer ${
-                                              act.hasElse
-                                                ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 shadow-sm'
-                                                : 'bg-white/5 border-white/10 hover:border-white/20 text-zinc-400 hover:text-white'
-                                            }`}
-                                          >
-                                            <span className={`w-2 h-2 rounded-full ${act.hasElse ? 'bg-amber-400' : 'bg-zinc-600'}`} />
-                                            {t('action_types.IF_CONDITION.enable_else', language)}
-                                          </button>
-                                        </div>
-
-                                        {/* Nested Then / Else Slots */}
-                                        <div className="space-y-3 pt-1">
-                                          {renderNestedSlot(
-                                            act,
-                                            'thenActions',
-                                            t('action_types.IF_CONDITION.then_title', language),
-                                            {
-                                              borderColor: 'border-emerald-500/80',
-                                              bgActive: 'bg-emerald-500/20',
-                                              borderHover: 'border-emerald-400',
-                                              badgeBg: 'bg-emerald-500/20 border border-emerald-500/30',
-                                              badgeText: 'text-emerald-400',
-                                              glowColor: 'rgba(16,185,129,0.25)',
-                                              emptyHint: t('action_types.IF_CONDITION.empty_then', language)
-                                            }
-                                          )}
-                                          {act.hasElse && renderNestedSlot(
-                                            act,
-                                            'elseActions',
-                                            t('action_types.IF_CONDITION.else_title', language),
-                                            {
-                                              borderColor: 'border-amber-500/80',
-                                              bgActive: 'bg-amber-500/20',
-                                              borderHover: 'border-amber-400',
-                                              badgeBg: 'bg-amber-500/20 border border-amber-500/30',
-                                              badgeText: 'text-amber-400',
-                                              glowColor: 'rgba(245,158,11,0.25)',
-                                              emptyHint: t('action_types.IF_CONDITION.empty_else', language)
-                                            }
-                                          )}
-                                        </div>
+                                    {actionDef.fields?.map((field, fIdx) => (
+                                      <div key={field.key || fIdx}>
+                                        {renderFieldInput(act, field, (k, v) => updateAction(act.id, k, v))}
                                       </div>
-                                    ) : actionDef.isBlock && act.definitionId === 'LOOP_REPEAT' ? (
-                                      <div className="space-y-3">
-                                        <div className="bg-[#151518] border border-white/10 rounded-xl p-3 flex flex-wrap items-center gap-2 text-xs shadow-inner">
-                                          <span className="px-2 py-1 rounded-md bg-blue-500/20 border border-blue-500/30 text-blue-400 font-bold tracking-wider">
-                                            {t('action_types.LOOP_REPEAT.loop_keyword', language)}
-                                          </span>
-
-                                          <div className="flex items-center bg-[#1c1c20] border border-white/10 rounded-lg px-2.5 py-1 focus-within:border-blue-500/50">
-                                            <span className="text-zinc-400 text-xs mr-2">{t('action_types.LOOP_REPEAT.count', language)}:</span>
-                                            <input
-                                              type="number"
-                                              min={1}
-                                              max={100}
-                                              value={act.count !== undefined ? act.count : 3}
-                                              onChange={(e) => updateAction(act.id, 'count', parseInt(e.target.value) || 1)}
-                                              className="bg-transparent text-white font-bold outline-none w-12 text-xs text-center"
-                                            />
-                                            <span className="text-zinc-500 text-xs ml-1">{t('action_types.LOOP_REPEAT.times', language)}</span>
-                                          </div>
-
-                                          <div className="flex items-center bg-[#1c1c20] border border-white/10 rounded-lg px-2.5 py-1 focus-within:border-blue-500/50">
-                                            <span className="text-zinc-400 text-xs mr-2">{t('action_types.LOOP_REPEAT.delay', language)}:</span>
-                                            <input
-                                              type="number"
-                                              min={0}
-                                              value={act.delay !== undefined ? act.delay : 100}
-                                              onChange={(e) => updateAction(act.id, 'delay', parseInt(e.target.value) || 0)}
-                                              className="bg-transparent text-white font-bold outline-none w-16 text-xs text-center"
-                                            />
-                                            <span className="text-zinc-500 text-xs ml-1">ms</span>
-                                          </div>
-                                        </div>
-
-                                        <div className="pt-1">
-                                          {renderNestedSlot(
-                                            act,
-                                            'loopActions',
-                                            t('action_types.LOOP_REPEAT.actions_title', language),
-                                            {
-                                              borderColor: 'border-blue-500/80',
-                                              bgActive: 'bg-blue-500/20',
-                                              borderHover: 'border-blue-400',
-                                              badgeBg: 'bg-blue-500/20 border border-blue-500/30',
-                                              badgeText: 'text-blue-400',
-                                              glowColor: 'rgba(59,130,246,0.25)',
-                                              emptyHint: t('action_types.LOOP_REPEAT.empty_loop', language)
-                                            }
-                                          )}
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      /* Standard Action Fields */
-                                      actionDef.fields?.map((field, fIdx) => (
-                                        <div key={field.key || fIdx}>
-                                          {renderFieldInput(act, field, (k, v) => updateAction(act.id, k, v))}
-                                        </div>
-                                      ))
-                                    )}
+                                    ))}
                                   </div>
                                 </motion.div>
                               )}
