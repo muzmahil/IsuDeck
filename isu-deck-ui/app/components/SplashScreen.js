@@ -51,6 +51,7 @@ export default function SplashScreen({ onReady }) {
       try {
         const loadedPlugins = await fileSystem.scanPlugins();
         useStore.getState().setPlugins(loadedPlugins);
+        useStore.getState().sendToEngine({ type: 'LOAD_PLUGINS' });
       } catch (e) {
         console.error('Plugin yükleme hatası:', e);
       }

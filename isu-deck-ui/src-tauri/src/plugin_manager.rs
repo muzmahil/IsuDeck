@@ -429,18 +429,25 @@ impl PluginManager {
         data_type: &str,
         args: &Value,
     ) {
-        let clean_name = action_name.split('.').last().unwrap_or(action_name).to_lowercase();
+        let norm = action_name.to_lowercase();
+        let clean_name = norm
+            .rsplit(|c| c == '.' || c == ':' || c == '/')
+            .next()
+            .unwrap_or(&norm);
+
         let target_entry = {
             let map = self.action_map.lock().unwrap();
-            map.get(&clean_name).cloned().or_else(|| {
-                map.iter().find_map(|(k, v)| {
-                    if clean_name.ends_with(k) || k.ends_with(&clean_name) {
-                        Some(v.clone())
-                    } else {
-                        None
-                    }
+            map.get(clean_name).cloned()
+                .or_else(|| map.get(&norm).cloned())
+                .or_else(|| {
+                    map.iter().find_map(|(k, v)| {
+                        if clean_name.ends_with(k) || k.ends_with(clean_name) || norm.ends_with(k) {
+                            Some(v.clone())
+                        } else {
+                            None
+                        }
+                    })
                 })
-            })
         };
 
         let items = match target_entry {
@@ -475,18 +482,25 @@ impl PluginManager {
     }
 
     pub fn handle_execute(&self, action_name: &str, args: &Value) -> Option<ActionResult> {
-        let clean_name = action_name.split('.').last().unwrap_or(action_name).to_lowercase();
+        let norm = action_name.to_lowercase();
+        let clean_name = norm
+            .rsplit(|c| c == '.' || c == ':' || c == '/')
+            .next()
+            .unwrap_or(&norm);
+
         let target_entry = {
             let map = self.action_map.lock().unwrap();
-            map.get(&clean_name).cloned().or_else(|| {
-                map.iter().find_map(|(k, v)| {
-                    if clean_name.ends_with(k) || k.ends_with(&clean_name) {
-                        Some(v.clone())
-                    } else {
-                        None
-                    }
+            map.get(clean_name).cloned()
+                .or_else(|| map.get(&norm).cloned())
+                .or_else(|| {
+                    map.iter().find_map(|(k, v)| {
+                        if clean_name.ends_with(k) || k.ends_with(clean_name) || norm.ends_with(k) {
+                            Some(v.clone())
+                        } else {
+                            None
+                        }
+                    })
                 })
-            })
         };
 
         match target_entry {

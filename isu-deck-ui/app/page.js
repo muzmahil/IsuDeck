@@ -145,20 +145,20 @@ export default function Home() {
             // Mantık ve Değişken Motorunu Çalıştır
             if (button.actions && button.actions.length > 0 && executeLogicSequence) {
               executeLogicSequence(button.actions);
+            } else {
+              const payload = {
+                  type: 'EXECUTE_ACTION',
+                  buttonIndex: btnIndex,
+                  actionData: {
+                      label: button.label,
+                      actions: button.actions || [],
+                      binding: button.binding
+                  },
+                  timestamp: Date.now()
+              };
+              console.log("[PAGE] Aksiyon gönderiliyor:", payload);
+              sendToEngine(payload);
             }
-
-            const payload = {
-                type: 'EXECUTE_ACTION',
-                buttonIndex: btnIndex,
-                actionData: {
-                    label: button.label,
-                    actions: button.actions || [],
-                    binding: button.binding
-                },
-                timestamp: Date.now()
-            };
-            console.log("[PAGE] Aksiyon gönderiliyor:", payload);
-            sendToEngine(payload);
         }
       }
     }
@@ -212,21 +212,21 @@ export default function Home() {
     // Mantık ve Değişken Motorunu Çalıştır
     if (button.actions && button.actions.length > 0 && executeLogicSequence) {
       executeLogicSequence(button.actions);
+    } else {
+      const payload = {
+        type: 'EXECUTE_ACTION',
+        buttonIndex: index,
+        actionData: {
+          label: button.label,
+          actions: button.actions || [],
+          binding: button.binding
+        },
+        timestamp: Date.now()
+      };
+      
+      console.log("[PAGE] Aksiyon gönderiliyor:", payload);
+      sendToEngine(payload);
     }
-
-    const payload = {
-      type: 'EXECUTE_ACTION',
-      buttonIndex: index,
-      actionData: {
-        label: button.label,
-        actions: button.actions || [],
-        binding: button.binding
-      },
-      timestamp: Date.now()
-    };
-    
-    console.log("[PAGE] Aksiyon gönderiliyor:", payload);
-    sendToEngine(payload);
   };
 
   const handleEditButton = (index) => {

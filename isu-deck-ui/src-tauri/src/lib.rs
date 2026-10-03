@@ -84,8 +84,24 @@ pub struct EngineState {
 pub fn isudeck_root(_app: &tauri::AppHandle) -> Result<PathBuf, String> {
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
+            if exe_dir.join("plugins").exists() || exe_dir.join("profiles.json").exists() {
+                return Ok(exe_dir.to_path_buf());
+            }
+            for ancestor in exe_dir.ancestors() {
+                if ancestor.join("plugins").exists() && (ancestor.join("profiles.json").exists() || ancestor.join("plugins").join("IsuDeck.OBSPlugin").exists()) {
+                    return Ok(ancestor.to_path_buf());
+                }
+            }
             return Ok(exe_dir.to_path_buf());
         }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        for ancestor in cwd.ancestors() {
+            if ancestor.join("plugins").exists() && ancestor.join("profiles.json").exists() {
+                return Ok(ancestor.to_path_buf());
+            }
+        }
+        return Ok(cwd);
     }
     std::env::current_dir().map_err(|e| e.to_string())
 }
@@ -549,6 +565,11 @@ async fn send_action(
                     for act in actions {
                         let raw_type = act.get("type").and_then(|v| v.as_str()).unwrap_or("");
                         let def_id = act.get("definitionId").and_then(|v| v.as_str()).unwrap_or("");
+
+                        if matches!(raw_type, "SET_VARIABLE" | "CHANGE_VARIABLE" | "IF_CONDITION" | "LOOP_REPEAT")
+                            || matches!(def_id, "SET_VARIABLE" | "CHANGE_VARIABLE" | "IF_CONDITION" | "LOOP_REPEAT") {
+                            continue;
+                        }
 
                         let is_core = matches!(
                             raw_type,
