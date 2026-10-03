@@ -1,0 +1,42 @@
+{
+  "name": "Interactive Counter (Node.js Daemon)",
+  "identifier": "com.isudeck.example.nodecounter",
+  "version": "1.0.0",
+  "author": "IsuDeck Community",
+  "description": "Interactive Node.js Daemon plugin supporting dynamic dropdown lists (dynamic_select) and real-time button badges.",
+  "executable": "counter.exe",
+  "icon": "icon.svg",
+  "daemon": true,
+  "config": [
+    {
+      "key": "stepSize",
+      "type": "number",
+      "label": "Default Step Size",
+      "placeholder": "1",
+      "required": true,
+      "value": 1
+    }
+  ],
+  "actions": [
+    {
+      "name": "increment_counter",
+      "label": "Increment Counter",
+      "icon": "icon.svg",
+      "fields": [
+        {
+          "key": "amount",
+          "type": "number",
+          "label": "Custom Increment Amount (Optional)",
+          "placeholder": "1",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "reset_counter",
+      "label": "Reset Counter",
+      "icon": "icon.svg",
+      "fields": []
+    }
+  ]
+}

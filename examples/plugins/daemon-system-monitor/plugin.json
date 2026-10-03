@@ -1,0 +1,34 @@
+{
+  "name": "System Monitor (Daemon Example)",
+  "identifier": "com.isudeck.example.systemmonitor",
+  "version": "1.0.0",
+  "author": "IsuDeck Community",
+  "description": "Continuous background daemon plugin that pushes live CPU and RAM stats to key badges.",
+  "executable": "monitor.exe",
+  "icon": "icon.svg",
+  "daemon": true,
+  "config": [
+    {
+      "key": "refreshInterval",
+      "type": "number",
+      "label": "Refresh Interval (Seconds)",
+      "placeholder": "2",
+      "required": true,
+      "value": 2
+    }
+  ],
+  "actions": [
+    {
+      "name": "show_cpu",
+      "label": "Live CPU Usage",
+      "icon": "icon.svg",
+      "fields": []
+    },
+    {
+      "name": "show_ram",
+      "label": "Live RAM Usage",
+      "icon": "icon.svg",
+      "fields": []
+    }
+  ]
+}

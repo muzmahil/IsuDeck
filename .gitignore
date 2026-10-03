@@ -1,0 +1,75 @@
+# ==========================================
+# IsuDeck Master .gitignore
+# ==========================================
+
+# --- Rust & Cargo Artifacts ---
+target/
+**/target/
+**/*.rs.bk
+Cargo.lock.temp
+
+# --- Node.js & Dependencies ---
+node_modules/
+**/node_modules/
+/.pnp
+.pnp.*
+.yarn/*
+!*.yarn/patches
+!*.yarn/plugins
+!*.yarn/releases
+!*.yarn/versions
+
+# --- Next.js & Frontend Build Outputs ---
+.next/
+**/.next/
+out/
+**/out/
+build/
+**/build/
+dist/
+**/dist/
+.vercel
+*.tsbuildinfo
+next-env.d.ts
+
+# --- Runtime & User Data ---
+# Kullanıcının yerel test profilleri ve ayarları (Repo'yu kirletmemesi için)
+profiles.json
+settings.json
+variables.json
+config.json
+**/config.json
+*.log
+install.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- Built Binaries ---
+# Derlenen uygulama binary'leri (GitHub Releases üzerinden dağıtılır)
+IsuDeck.exe
+*.pdb
+*.ilk
+*.exp
+
+# Ancak sürücü yükleyici ve kütüphanesini repoda tut:
+!drivers/install-interception.exe
+!drivers/install_helper.cmd
+!interception.dll
+
+# --- Environment & Secrets ---
+.env
+.env*.local
+*.pem
+
+# --- OS & IDE Temporary Files ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~

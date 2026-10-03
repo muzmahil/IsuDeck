@@ -1,0 +1,43 @@
+{
+  "name": "Discord Webhook (One-Shot Example)",
+  "identifier": "com.isudeck.example.discordwebhook",
+  "version": "1.0.0",
+  "author": "IsuDeck Community",
+  "description": "On-demand one-shot plugin example that consumes 0 MB idle RAM and triggers on key press.",
+  "executable": "webhook.exe",
+  "icon": "icon.svg",
+  "daemon": false,
+  "config": [
+    {
+      "key": "defaultWebhookUrl",
+      "type": "text",
+      "label": "Default Webhook URL",
+      "placeholder": "https://discord.com/api/webhooks/...",
+      "required": false,
+      "value": ""
+    }
+  ],
+  "actions": [
+    {
+      "name": "send_discord_message",
+      "label": "Send Discord Message",
+      "icon": "icon.svg",
+      "fields": [
+        {
+          "key": "content",
+          "type": "text",
+          "label": "Message Content",
+          "placeholder": "e.g. Stream is starting now!",
+          "required": true
+        },
+        {
+          "key": "webhookUrl",
+          "type": "text",
+          "label": "Custom Webhook URL (Optional)",
+          "placeholder": "Leave empty to use default webhook URL",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

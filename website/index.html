@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="tr" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IsuDeck — İkinci Klavyenizi Sanal Stream Deck'e Dönüştürün</title>
+  <meta name="description" content="Masanızdaki ikinci klavyeyi ana klavyenizden tamamen bağımsız çalışan sanal bir Stream Deck ve kontrol paneline dönüştürün." />
+  
+  <!-- Inter Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      background-color: #000000;
+      color: #f5f5f7;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      overflow-x: hidden;
+      letter-spacing: -0.012em;
+    }
+    
+    .tracking-headline {
+      letter-spacing: -0.035em;
+    }
+
+    .glass-nav {
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .glass-card {
+      background: #0d0d10;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      transition: all 0.25s ease;
+    }
+    .glass-card:hover {
+      border-color: rgba(255, 255, 255, 0.18);
+      transform: translateY(-2px);
+    }
+
+    .subtle-hero-glow {
+      background: radial-gradient(circle 600px at 50% 120px, rgba(37, 99, 235, 0.14), transparent 70%);
+    }
+
+    .gradient-heading {
+      background: linear-gradient(180deg, #ffffff 0%, rgba(255, 255, 255, 0.72) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .deck-item-btn {
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+    .deck-item-btn:hover {
+      border-color: rgba(255, 255, 255, 0.25);
+      background-color: #1a1a1e;
+    }
+    .deck-item-btn:active {
+      transform: scale(0.95);
+    }
+  </style>
+</head>
+<body class="selection:bg-blue-600 selection:text-white">
+
+  <!-- NAVBAR -->
+  <nav class="glass-nav fixed top-0 inset-x-0 z-50">
+    <div class="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
+      <a href="#" class="flex items-center gap-2.5 group">
+        <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-xs font-bold text-white shadow-md shadow-blue-500/20 group-hover:scale-105 transition-transform">
+          I
+        </div>
+        <span class="font-semibold text-sm text-white tracking-tight">IsuDeck</span>
+      </a>
+
+      <div class="hidden md:flex items-center gap-8 text-xs font-medium text-zinc-400">
+        <a href="#about" class="hover:text-white transition-colors" data-i18n="nav_about">Nasıl Çalışır?</a>
+        <a href="#features" class="hover:text-white transition-colors" data-i18n="nav_features">Neler Yapabilirsiniz?</a>
+        <a href="#comparison" class="hover:text-white transition-colors" data-i18n="nav_comparison">Karşılaştırma</a>
+        <a href="#plugins" class="hover:text-white transition-colors" data-i18n="nav_plugins">Eklentiler</a>
+      </div>
+
+      <div class="flex items-center gap-4">
+        <!-- Language Dropdown Bar -->
+        <div class="relative inline-flex items-center">
+          <select id="langSelect" onchange="setLanguage(this.value)" class="appearance-none bg-white/[0.06] hover:bg-white/[0.1] text-xs font-medium text-zinc-200 pl-7 pr-7 py-1.5 rounded-lg border border-white/10 focus:outline-none focus:border-blue-500/50 transition-colors cursor-pointer">
+            <option value="tr" class="bg-[#141416] text-white">Türkçe</option>
+            <option value="en" class="bg-[#141416] text-white">English</option>
+          </select>
+          <svg class="absolute left-2.5 pointer-events-none text-zinc-400" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><path d="M2 12h20"/></svg>
+          <svg class="absolute right-2 pointer-events-none text-zinc-400" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+
+        <a href="https://github.com" target="_blank" class="text-xs font-medium text-zinc-400 hover:text-white transition-colors hidden sm:block">
+          GitHub
+        </a>
+        <a href="#download" class="text-xs font-semibold bg-white text-black hover:bg-zinc-200 px-4 py-1.5 rounded-full transition-all shadow-sm active:scale-95" data-i18n="nav_download">
+          İndir
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <header class="relative pt-36 pb-20 md:pt-44 md:pb-24 subtle-hero-glow">
+    <div class="max-w-3xl mx-auto px-6 text-center">
+      
+      <h1 class="text-4xl sm:text-6xl md:text-7xl font-extrabold tracking-headline gradient-heading leading-[1.08] mb-6" data-i18n="hero_title">
+        Masanızdaki ikinci klavyeyi sanal bir Stream Deck'e dönüştürün.
+      </h1>
+
+      <p class="text-base sm:text-lg md:text-xl text-zinc-300 font-normal leading-relaxed max-w-2xl mx-auto mb-10" data-i18n="hero_desc">
+        Kenarda duran eski bir USB klavyeniz veya numpad'iniz mi var? Bilgisayarınıza bağlayın; ana klavyenizi hiç etkilemeden yayın, oyun, müzik ve üretkenlik için tam teşekküllü bir kontrol paneline sahip olun!
+      </p>
+
+      <div class="flex flex-col sm:flex-row items-center justify-center gap-3.5 mb-14">
+        <a href="#download" class="w-full sm:w-auto px-7 py-3.5 rounded-full bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold flex items-center justify-center gap-2 shadow-lg shadow-blue-600/25 transition-all active:scale-95" data-i18n="hero_cta_download">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+          <span>Windows için İndir (v1.0)</span>
+        </a>
+        <a href="https://github.com" target="_blank" class="w-full sm:w-auto px-6 py-3.5 rounded-full bg-white/[0.06] hover:bg-white/[0.1] text-zinc-200 hover:text-white text-sm font-medium border border-white/10 flex items-center justify-center gap-2 transition-all" data-i18n="hero_cta_github">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+          <span>Kaynak Kodları İncele</span>
+        </a>
+      </div>
+
+      <div class="flex flex-wrap items-center justify-center gap-6 sm:gap-8 text-xs text-zinc-400 font-medium">
+        <span class="flex items-center gap-1.5 text-zinc-300">
+          <svg class="text-blue-500" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          <span data-i18n="hero_pill_1">Kurulumsuz Tek Bir .exe</span>
+        </span>
+        <span class="flex items-center gap-1.5 text-zinc-300">
+          <svg class="text-blue-500" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          <span data-i18n="hero_pill_2">Rust ile Ultra Hafif</span>
+        </span>
+        <span class="flex items-center gap-1.5 text-zinc-300">
+          <svg class="text-blue-500" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          <span data-i18n="hero_pill_3">40 MB Altı Bellek</span>
+        </span>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- APP PREVIEW WINDOW -->
+  <section class="max-w-4xl mx-auto px-6 pb-24">
+    <div class="rounded-2xl border border-white/10 bg-[#0e0e11] shadow-2xl shadow-black/80 overflow-hidden">
+      <!-- Window Titlebar -->
+      <div class="h-10 bg-[#161619] border-b border-white/5 px-4 flex items-center justify-between text-xs text-zinc-400 select-none">
+        <div class="flex items-center gap-2">
+          <div class="w-2.5 h-2.5 rounded-full bg-zinc-600"></div>
+          <div class="w-2.5 h-2.5 rounded-full bg-zinc-600"></div>
+          <div class="w-2.5 h-2.5 rounded-full bg-zinc-600"></div>
+          <span class="ml-2 font-semibold text-zinc-300 text-xs tracking-tight">IsuDeck</span>
+        </div>
+        <div class="text-xs text-zinc-500 font-medium" data-i18n="mockup_profile_title">Profil 1 — Yayın &amp; Üretkenlik</div>
+      </div>
+
+      <!-- Clean Grid Representation -->
+      <div class="p-6 sm:p-8 bg-[#09090b]">
+        <div class="grid grid-cols-3 sm:grid-cols-5 gap-3 aspect-[16/9]">
+          
+          <button onclick="playFeedback(this)" class="deck-item-btn rounded-xl bg-[#151518] border border-white/10 p-3 flex flex-col items-center justify-center text-center">
+            <span class="text-2xl mb-1">🎙️</span>
+            <span class="text-xs font-semibold text-white" data-i18n="btn_mic">Mikrofon</span>
+            <span class="text-[10px] text-zinc-400 mt-0.5">Numpad 1</span>
+          </button>
+
+          <button onclick="playFeedback(this)" class="deck-item-btn rounded-xl bg-[#151518] border border-white/10 p-3 flex flex-col items-center justify-center text-center">
+            <span class="text-2xl mb-1">🎧</span>
+            <span class="text-xs font-semibold text-white" data-i18n="btn_audio">Kulaklık</span>
+            <span class="text-[10px] text-zinc-400 mt-0.5">Numpad 2</span>
+          </button>
+
+          <button onclick="playFeedback(this)" class="deck-item-btn rounded-xl bg-[#151518] border border-white/10 p-3 flex flex-col items-center justify-center text-center">
+            <span class="text-2xl mb-1">🎵</span>
+            <span class="text-xs font-semibold text-white" data-i18n="btn_spotify">Spotify</span>
+            <span class="text-[10px] text-zinc-400 mt-0.5">Numpad 3</span>
+          </button>
+
+          <button onclick="playFeedback(this)" class="deck-item-btn rounded-xl bg-[#151518] border border-white/10 p-3 flex flex-col items-center justify-center text-center">
+            <span class="text-2xl mb-1">💻</span>
+            <span class="text-xs font-semibold text-white" data-i18n="btn_terminal">Terminal</span>
+            <span class="text-[10px] text-zinc-400 mt-0.5">Numpad 4</span>
+          </button>
+
+          <button onclick="playFeedback(this)" class="deck-item-btn rounded-xl bg-[#151518] border border-white/10 p-3 flex flex-col items-center justify-center text-center">
+            <span class="text-2xl mb-1">📸</span>
+            <span class="text-xs font-semibold text-white" data-i18n="btn_screenshot">Ekran Al</span>
+            <span class="text-[10px] text-zinc-400 mt-0.5">Numpad 5</span>
+          </button>
+
+          <button onclick="playFeedback(this)" class="deck-item-btn rounded-xl bg-[#151518] border border-white/10 p-3 flex flex-col items-center justify-center text-center">
+            <span class="text-2xl mb-1">📁</span>
+            <span class="text-xs font-semibold text-white" data-i18n="btn_projects">Projeler</span>
+            <span class="text-[10px] text-zinc-400 mt-0.5">Numpad 6</span>
+          </button>
+
+          <button onclick="playFeedback(this)" class="deck-item-btn rounded-xl bg-[#151518] border border-white/10 p-3 flex flex-col items-center justify-center text-center">
+            <span class="text-2xl mb-1">🌐</span>
+            <span class="text-xs font-semibold text-white" data-i18n="btn_browser">Tarayıcı</span>
+            <span class="text-[10px] text-zinc-400 mt-0.5">Numpad 7</span>
+          </button>
+
+          <button onclick="playFeedback(this)" class="deck-item-btn rounded-xl bg-[#151518] border border-white/10 p-3 flex flex-col items-center justify-center text-center">
+            <span class="text-2xl mb-1">⌨️</span>
+            <span class="text-xs font-semibold text-white" data-i18n="btn_hotkey">Kısayol</span>
+            <span class="text-[10px] text-zinc-400 mt-0.5">Numpad 8</span>
+          </button>
+
+          <button onclick="playFeedback(this)" class="deck-item-btn rounded-xl bg-[#151518] border border-white/10 p-3 flex flex-col items-center justify-center text-center">
+            <span class="text-2xl mb-1">🔔</span>
+            <span class="text-xs font-semibold text-white" data-i18n="btn_sound">Ses Çal</span>
+            <span class="text-[10px] text-zinc-400 mt-0.5">Numpad 9</span>
+          </button>
+
+          <button onclick="playFeedback(this)" class="deck-item-btn rounded-xl bg-[#151518] border border-white/10 p-3 flex flex-col items-center justify-center text-center">
+            <span class="text-2xl mb-1">🔄</span>
+            <span class="text-xs font-semibold text-white" data-i18n="btn_profile">Profil</span>
+            <span class="text-[10px] text-zinc-400 mt-0.5">Numpad 0</span>
+          </button>
+
+          <button onclick="playFeedback(this)" class="deck-item-btn rounded-xl bg-[#151518] border border-white/10 p-3 flex flex-col items-center justify-center text-center">
+            <span class="text-2xl mb-1">⏯️</span>
+            <span class="text-xs font-semibold text-white" data-i18n="btn_playpause">Oynat</span>
+            <span class="text-[10px] text-zinc-400 mt-0.5">Numpad .</span>
+          </button>
+
+          <button onclick="playFeedback(this)" class="deck-item-btn rounded-xl bg-[#151518] border border-white/10 p-3 flex flex-col items-center justify-center text-center">
+            <span class="text-2xl mb-1">🔒</span>
+            <span class="text-xs font-semibold text-white" data-i18n="btn_lock">Kilitle</span>
+            <span class="text-[10px] text-zinc-400 mt-0.5">Numpad +</span>
+          </button>
+
+          <button onclick="playFeedback(this)" class="deck-item-btn rounded-xl bg-[#151518] border border-white/10 p-3 flex flex-col items-center justify-center text-center">
+            <span class="text-2xl mb-1">📋</span>
+            <span class="text-xs font-semibold text-white" data-i18n="btn_clipboard">Pano</span>
+            <span class="text-[10px] text-zinc-400 mt-0.5">Numpad -</span>
+          </button>
+
+          <button onclick="playFeedback(this)" class="deck-item-btn rounded-xl bg-[#151518] border border-white/10 p-3 flex flex-col items-center justify-center text-center">
+            <span class="text-2xl mb-1">🎮</span>
+            <span class="text-xs font-semibold text-white" data-i18n="btn_game">Oyun Modu</span>
+            <span class="text-[10px] text-zinc-400 mt-0.5">Numpad *</span>
+          </button>
+
+          <button onclick="playFeedback(this)" class="deck-item-btn rounded-xl bg-[#151518] border border-white/10 p-3 flex flex-col items-center justify-center text-center">
+            <span class="text-2xl mb-1">⚙️</span>
+            <span class="text-xs font-semibold text-white" data-i18n="btn_settings">Ayarlar</span>
+            <span class="text-[10px] text-zinc-400 mt-0.5">Numpad /</span>
+          </button>
+
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS (Simple & Intuitive) -->
+  <section id="about" class="py-20 border-t border-white/5 bg-[#050507]">
+    <div class="max-w-4xl mx-auto px-6">
+      
+      <div class="max-w-xl mb-12">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-blue-400" data-i18n="about_tag">Nasıl Çalışıyor?</h2>
+        <p class="text-3xl sm:text-4xl font-bold tracking-tight text-white mt-2" data-i18n="about_title">
+          Tuşlarınız birbirine asla karışmıyor.
+        </p>
+        <p class="text-sm text-zinc-400 mt-3 leading-relaxed" data-i18n="about_desc">
+          Genellikle bilgisayara iki klavye bağlarsanız ikisi de aynı harfi yazar. IsuDeck ise iki klavyeyi birbirinden ayırır: ikinci klavyenizdeki tuşlar ekrana harf yazmaz, oyununuzu bölmez; yalnızca atadığınız kontrolleri sessizce çalıştırır.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+        
+        <div class="glass-card p-6 sm:p-7 rounded-2xl">
+          <div class="text-xs font-semibold text-zinc-400 mb-2" data-i18n="card_old_title">Standart Durum</div>
+          <h3 class="text-base font-bold text-zinc-200 mb-2" data-i18n="card_old_heading">Tuş Çakışması ve Karışıklık</h3>
+          <p class="text-xs sm:text-sm text-zinc-400 leading-relaxed mb-5" data-i18n="card_old_desc">
+            Normalde ikinci bir klavyeden tuşa bastığınızda Windows bunu ana klavyenizle aynı sayar; oynadığınız oyunda karakteriniz yürür ya da açık olan sohbete istemediğiniz harfler dolar.
+          </p>
+          <div class="bg-black/60 p-3.5 rounded-xl border border-white/5 text-xs text-zinc-400 space-y-1.5">
+            <div data-i18n="card_old_point1">• İkinci klavyede 'A' tuşuna basıldı</div>
+            <div class="text-zinc-500" data-i18n="card_old_point2">• Oyununuzda karakter sola yürüdü (İstenmeyen)</div>
+            <div class="text-zinc-500" data-i18n="card_old_point3">• Sohbet penceresine 'a' harfi yazıldı</div>
+          </div>
+        </div>
+
+        <div class="glass-card p-6 sm:p-7 rounded-2xl border-blue-500/30 bg-gradient-to-b from-blue-950/10 to-transparent">
+          <div class="text-xs font-semibold text-blue-400 mb-2" data-i18n="card_isu_title">IsuDeck ile</div>
+          <h3 class="text-base font-bold text-white mb-2" data-i18n="card_isu_heading">Klavyeleriniz Birbirinden Bağımsız</h3>
+          <p class="text-xs sm:text-sm text-zinc-300 leading-relaxed mb-5" data-i18n="card_isu_desc">
+            IsuDeck iki klavyeyi birbirinden tamamen ayırır. İkinci klavyenizdeki tuşlar ekrana yansımaz; yalnızca hedeflediğiniz sesi çalar, yayını yönetir veya kısayolu anında çalıştırır!
+          </p>
+          <div class="bg-black/60 p-3.5 rounded-xl border border-blue-500/20 text-xs text-zinc-200 space-y-1.5">
+            <div data-i18n="card_isu_point1">• İkinci klavyede 'A' tuşuna basıldı</div>
+            <div class="text-blue-400 font-medium" data-i18n="card_isu_point2">• Windows'a harf olarak gitmeden algılandı</div>
+            <div class="text-emerald-400 font-medium" data-i18n="card_isu_point3">• Atadığınız kontrol sessizce ve anında çalıştı</div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </section>
+
+  <!-- FEATURES (Virtual Stream Deck Features) -->
+  <section id="features" class="py-20 border-t border-white/5">
+    <div class="max-w-4xl mx-auto px-6">
+      
+      <div class="max-w-xl mb-12">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-blue-400" data-i18n="features_tag">Özellikler</h2>
+        <p class="text-3xl sm:text-4xl font-bold tracking-tight text-white mt-2" data-i18n="features_title">
+          Sanal Stream Deck Deneyimi
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+        
+        <!-- Bento 1: Rust & Tauri -->
+        <div class="glass-card p-6 sm:p-7 rounded-2xl md:col-span-2 flex flex-col justify-between">
+          <div>
+            <div class="text-xs font-semibold text-blue-400 mb-2" data-i18n="bento_perf_tag">Hızlı &amp; Hafif</div>
+            <h3 class="text-xl font-bold text-white mb-2" data-i18n="bento_perf_title">Rust ile Sıfır Hantallık</h3>
+            <p class="text-sm text-zinc-400 leading-relaxed" data-i18n="bento_perf_desc">
+              Arka planda yüzlerce megabayt bellek yiyen hantal uygulamaları unutun. IsuDeck, Rust çekirdeği sayesinde 40 MB'ın altında bellek tüketir ve oyunlarınızda tek bir kare bile kaybettirmez.
+            </p>
+          </div>
+          <div class="mt-6 pt-4 border-t border-white/5 flex gap-6 text-xs text-zinc-400">
+            <span>RAM: <strong class="text-white">&lt;40 MB</strong></span>
+            <span>İşlemci: <strong class="text-white">%0.0</strong></span>
+            <span>Tepki: <strong class="text-white">Anlık</strong></span>
+          </div>
+        </div>
+
+        <!-- Bento 2: Portable -->
+        <div class="glass-card p-6 sm:p-7 rounded-2xl flex flex-col justify-between">
+          <div>
+            <div class="text-xs font-semibold text-blue-400 mb-2" data-i18n="bento_port_tag">Taşınabilir</div>
+            <h3 class="text-xl font-bold text-white mb-2" data-i18n="bento_port_title">Kurulum Gerektirmez</h3>
+            <p class="text-xs sm:text-sm text-zinc-400 leading-relaxed" data-i18n="bento_port_desc">
+              Kayıt defteri kirliliği yok. Tek bir .exe dosyasını flash belleğinize atın, istediğiniz bilgisayarda doğrudan çalıştırın.
+            </p>
+          </div>
+          <div class="mt-6 text-xs text-zinc-400">Portable &amp; Bağımsız</div>
+        </div>
+
+        <!-- Bento 3: Custom Sounds & Visuals -->
+        <div class="glass-card p-6 sm:p-7 rounded-2xl flex flex-col justify-between">
+          <div>
+            <div class="text-xs font-semibold text-blue-400 mb-2" data-i18n="bento_custom_tag">Kişiselleştirme</div>
+            <h3 class="text-xl font-bold text-white mb-2" data-i18n="bento_custom_title">Özel Sesler ve Görseller</h3>
+            <p class="text-xs sm:text-sm text-zinc-400 leading-relaxed" data-i18n="bento_custom_desc">
+              Her tuşa özel ses dosyası (`.mp3`, `.wav`) atayabilir, kendi emojilerinizi veya şeffaf PNG görsellerinizi ekleyebilirsiniz.
+            </p>
+          </div>
+          <div class="mt-6 text-xs text-zinc-400">WAV / MP3 • Emoji • PNG</div>
+        </div>
+
+        <!-- Bento 4: Expandable Plugin SDK -->
+        <div id="plugins" class="glass-card p-6 sm:p-7 rounded-2xl md:col-span-2 flex flex-col justify-between">
+          <div>
+            <div class="text-xs font-semibold text-blue-400 mb-2" data-i18n="bento_sdk_tag">Genişletilebilirlik</div>
+            <h3 class="text-xl font-bold text-white mb-2" data-i18n="bento_sdk_title">İsteğe Bağlı Eklenti Desteği</h3>
+            <p class="text-sm text-zinc-400 leading-relaxed" data-i18n="bento_sdk_desc">
+              IsuDeck hafif bir çekirdekle gelir. İhtiyaç duyarsanız OBS Studio gibi eklentileri sonradan kolayca entegre edebilir; tuşlarınıza canlı rozetler kazandırabilir veya kendi eklentinizi yazabilirsiniz!
+            </p>
+          </div>
+          <div class="mt-6 pt-4 border-t border-white/5 flex flex-wrap gap-2 text-xs text-zinc-400">
+            <span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10">Açık Eklenti Altyapısı</span>
+            <span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10">Canlı Tuş Rozetleri</span>
+            <span class="px-2.5 py-1 rounded-md bg-white/5 border border-white/10">İsteğe Bağlı Yükleme</span>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </section>
+
+  <!-- COMPARISON TABLE (Respectful & Clear) -->
+  <section id="comparison" class="py-20 border-t border-white/5 bg-[#050507]">
+    <div class="max-w-3xl mx-auto px-6">
+      
+      <div class="max-w-xl mb-12">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-blue-400" data-i18n="comp_tag">Karşılaştırma</h2>
+        <p class="text-3xl sm:text-4xl font-bold tracking-tight text-white mt-2" data-i18n="comp_title">
+          Farklı Yaklaşımlar, Ortak Amaç.
+        </p>
+        <p class="text-sm text-zinc-400 mt-2" data-i18n="comp_desc">
+          Fiziksel donanım konsolları harika cihazlardır; IsuDeck ise elinizdeki klavyeleri değerlendirerek aynı kontrol rahatlığını masanıza getiren açık kaynaklı bir yazılımdır.
+        </p>
+      </div>
+
+      <div class="rounded-2xl border border-white/10 overflow-hidden bg-[#0c0c0e]">
+        <table class="w-full text-left border-collapse text-xs sm:text-sm">
+          <thead>
+            <tr class="border-b border-white/10 bg-white/[0.02]">
+              <th class="p-4 sm:p-5 font-semibold text-zinc-400" data-i18n="th_feature">Özellik</th>
+              <th class="p-4 sm:p-5 font-semibold text-zinc-400" data-i18n="th_hardware">Özel Donanım Konsolları</th>
+              <th class="p-4 sm:p-5 font-bold text-white bg-white/[0.04]">IsuDeck</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 text-zinc-300">
+            <tr>
+              <td class="p-4 sm:p-5 font-medium text-white" data-i18n="row1_label">Gereken Cihaz</td>
+              <td class="p-4 sm:p-5 text-zinc-400" data-i18n="row1_val1">Özel donanım konsolu</td>
+              <td class="p-4 sm:p-5 text-blue-300 font-medium bg-white/[0.02]" data-i18n="row1_val2">Herhangi bir ikincil USB klavye veya numpad</td>
+            </tr>
+            <tr>
+              <td class="p-4 sm:p-5 font-medium text-white" data-i18n="row2_label">Kullanılabilir Tuş Sayısı</td>
+              <td class="p-4 sm:p-5 text-zinc-400" data-i18n="row2_val1">Cihazla sınırlı (genelde 15)</td>
+              <td class="p-4 sm:p-5 text-white font-medium bg-white/[0.02]" data-i18n="row2_val2">Klavyenizin tüm tuşları (100+)</td>
+            </tr>
+            <tr>
+              <td class="p-4 sm:p-5 font-medium text-white" data-i18n="row3_label">Kaynak Tüketimi</td>
+              <td class="p-4 sm:p-5 text-zinc-400" data-i18n="row3_val1">~200 - 500 MB RAM</td>
+              <td class="p-4 sm:p-5 text-emerald-400 font-medium bg-white/[0.02]" data-i18n="row3_val2">&lt;40 MB RAM (Rust)</td>
+            </tr>
+            <tr>
+              <td class="p-4 sm:p-5 font-medium text-white" data-i18n="row4_label">Yazılım Lisansı</td>
+              <td class="p-4 sm:p-5 text-zinc-400" data-i18n="row4_val1">Kapalı tescilli yazılım</td>
+              <td class="p-4 sm:p-5 text-white font-medium bg-white/[0.02]" data-i18n="row4_val2">Tamamen açık kaynak ve ücretsiz</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 3 STEPS -->
+  <section class="py-20 border-t border-white/5">
+    <div class="max-w-3xl mx-auto px-6">
+      
+      <div class="max-w-xl mb-12">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-blue-400" data-i18n="steps_tag">Kurulum</h2>
+        <p class="text-3xl sm:text-4xl font-bold tracking-tight text-white mt-2" data-i18n="steps_title">
+          3 basit adımda başlayın.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-8">
+        
+        <div class="space-y-2.5">
+          <div class="w-7 h-7 rounded-full bg-blue-600/20 text-blue-400 text-xs font-bold flex items-center justify-center border border-blue-500/30">1</div>
+          <h3 class="text-base font-bold text-white" data-i18n="step1_title">Uygulamayı Açın</h3>
+          <p class="text-xs sm:text-sm text-zinc-400 leading-relaxed" data-i18n="step1_desc">
+            Kurulum sihirbazı yok. İndirdiğiniz .exe dosyasını doğrudan çalıştırın.
+          </p>
+        </div>
+
+        <div class="space-y-2.5">
+          <div class="w-7 h-7 rounded-full bg-blue-600/20 text-blue-400 text-xs font-bold flex items-center justify-center border border-blue-500/30">2</div>
+          <h3 class="text-base font-bold text-white" data-i18n="step2_title">Klavyenizi Bağlayın</h3>
+          <p class="text-xs sm:text-sm text-zinc-400 leading-relaxed" data-i18n="step2_desc">
+            Kullanmak istediğiniz USB klavyeyi veya numpad'i bilgisayara takın.
+          </p>
+        </div>
+
+        <div class="space-y-2.5">
+          <div class="w-7 h-7 rounded-full bg-blue-600/20 text-blue-400 text-xs font-bold flex items-center justify-center border border-blue-500/30">3</div>
+          <h3 class="text-base font-bold text-white" data-i18n="step3_title">Tuşlarınızı Atayın</h3>
+          <p class="text-xs sm:text-sm text-zinc-400 leading-relaxed" data-i18n="step3_desc">
+            İstediğiniz tuşa tıklayın; sesinizi, kısayolunuzu veya uygulamanızı belirleyin.
+          </p>
+        </div>
+
+      </div>
+
+    </div>
+  </section>
+
+  <!-- DOWNLOAD CTA -->
+  <section id="download" class="py-20 border-t border-white/5 subtle-hero-glow text-center">
+    <div class="max-w-2xl mx-auto px-6">
+      
+      <h2 class="text-3xl sm:text-5xl font-extrabold tracking-headline text-white mb-3" data-i18n="cta_title">
+        IsuDeck'i hemen deneyin.
+      </h2>
+      <p class="text-sm sm:text-base text-zinc-400 max-w-md mx-auto mb-8" data-i18n="cta_desc">
+        Tamamen ücretsiz ve açık kaynaklıdır. İndirin ve ikinci klavyenizi bugün değerlendirin.
+      </p>
+
+      <div class="inline-flex flex-col sm:flex-row items-center gap-3.5">
+        <a href="https://github.com" class="px-8 py-3.5 rounded-full bg-white text-black font-semibold text-sm hover:bg-zinc-200 transition-all shadow-lg active:scale-95" data-i18n="cta_button">
+          IsuDeck v1.0 İndir (.exe)
+        </a>
+      </div>
+
+      <div class="mt-5 text-xs text-zinc-400 font-medium">
+        Windows 10 / 11 (64-bit) • Taşınabilir (Portable) Sürüm
+      </div>
+
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="py-10 border-t border-white/5 text-xs text-zinc-500 bg-black">
+    <div class="max-w-5xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="flex items-center gap-2">
+        <span class="font-semibold text-zinc-300">IsuDeck</span>
+        <span>—</span>
+        <span data-i18n="footer_rights">Sanal Stream Deck ve Makro Aracı</span>
+      </div>
+      <div class="flex items-center gap-5 text-zinc-400 text-xs font-medium">
+        <a href="https://github.com" target="_blank" class="hover:text-white transition-colors">GitHub</a>
+        <a href="#about" class="hover:text-white transition-colors" data-i18n="nav_about">Nasıl Çalışır?</a>
+        <a href="#features" class="hover:text-white transition-colors" data-i18n="nav_features">Özellikler</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Web Audio API Click Feedback for Mockup & Multi-Language Logic -->
+  <script>
+    let audioCtx = null;
+    function playFeedback(el) {
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(150, audioCtx.currentTime + 0.05);
+        gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.05);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.05);
+      } catch(e) {}
+    }
+
+    // MULTI-LANGUAGE DICTIONARY (TR / EN)
+    const translations = {
+      tr: {
+        nav_about: 'Nasıl Çalışır?',
+        nav_features: 'Neler Yapabilirsiniz?',
+        nav_comparison: 'Karşılaştırma',
+        nav_plugins: 'Eklentiler',
+        nav_download: 'İndir',
+
+        hero_title: "Masanızdaki ikinci klavyeyi sanal bir Stream Deck'e dönüştürün.",
+        hero_desc: "Kenarda duran eski bir USB klavyeniz veya numpad'iniz mi var? Bilgisayarınıza bağlayın; ana klavyenizi hiç etkilemeden yayın, oyun, müzik ve üretkenlik için tam teşekküllü bir kontrol paneline sahip olun!",
+        hero_cta_download: 'Windows için İndir (v1.0)',
+        hero_cta_github: 'Kaynak Kodları İncele',
+        hero_pill_1: 'Kurulumsuz Tek Bir .exe',
+        hero_pill_2: 'Rust ile Ultra Hafif',
+        hero_pill_3: '40 MB Altı Bellek',
+
+        mockup_profile_title: 'Profil 1 — Yayın & Üretkenlik',
+        btn_mic: 'Mikrofon',
+        btn_audio: 'Kulaklık',
+        btn_spotify: 'Spotify',
+        btn_terminal: 'Terminal',
+        btn_screenshot: 'Ekran Al',
+        btn_projects: 'Projeler',
+        btn_browser: 'Tarayıcı',
+        btn_hotkey: 'Kısayol',
+        btn_sound: 'Ses Çal',
+        btn_profile: 'Profil',
+        btn_playpause: 'Oynat',
+        btn_lock: 'Kilitle',
+        btn_clipboard: 'Pano',
+        btn_game: 'Oyun Modu',
+        btn_settings: 'Ayarlar',
+
+        about_tag: 'Nasıl Çalışıyor?',
+        about_title: 'Tuşlarınız birbirine asla karışmıyor.',
+        about_desc: 'Genellikle bilgisayara iki klavye bağlarsanız ikisi de aynı harfi yazar. IsuDeck ise iki klavyeyi birbirinden ayırır: ikinci klavyenizdeki tuşlar ekrana harf yazmaz, oyununuzu bölmez; yalnızca atadığınız kontrolleri sessizce çalıştırır.',
+
+        card_old_title: 'Standart Durum',
+        card_old_heading: 'Tuş Çakışması ve Karışıklık',
+        card_old_desc: 'Normalde ikinci bir klavyeden tuşa bastığınızda Windows bunu ana klavyenizle aynı sayar; oynadığınız oyunda karakteriniz yürür ya da açık olan sohbete istemediğiniz harfler dolar.',
+        card_old_point1: "• İkinci klavyede 'A' tuşuna basıldı",
+        card_old_point2: "• Oyununuzda karakter sola yürüdü (İstenmeyen)",
+        card_old_point3: "• Sohbet penceresine 'a' harfi yazıldı",
+
+        card_isu_title: 'IsuDeck ile',
+        card_isu_heading: 'Klavyeleriniz Birbirinden Bağımsız',
+        card_isu_desc: 'IsuDeck iki klavyeyi birbirinden tamamen ayırır. İkinci klavyenizdeki tuşlar ekrana yansımaz; yalnızca hedeflediğiniz sesi çalar, yayını yönetir veya kısayolu anında çalıştırır!',
+        card_isu_point1: "• İkinci klavyede 'A' tuşuna basıldı",
+        card_isu_point2: "• Windows'a harf olarak gitmeden algılandı",
+        card_isu_point3: "• Atadığınız kontrol sessizce ve anında çalıştı",
+
+        features_tag: 'Özellikler',
+        features_title: 'Sanal Stream Deck Deneyimi',
+
+        bento_perf_tag: 'Hızlı & Hafif',
+        bento_perf_title: 'Rust ile Sıfır Hantallık',
+        bento_perf_desc: "Arka planda yüzlerce megabayt bellek yiyen hantal uygulamaları unutun. IsuDeck, Rust çekirdeği sayesinde 40 MB'ın altında bellek tüketir ve oyunlarınızda tek bir kare bile kaybettirmez.",
+
+        bento_port_tag: 'Taşınabilir',
+        bento_port_title: 'Kurulum Gerektirmez',
+        bento_port_desc: 'Kayıt defteri kirliliği yok. Tek bir .exe dosyasını flash belleğinize atın, istediğiniz bilgisayarda doğrudan çalıştırın.',
+
+        bento_custom_tag: 'Kişiselleştirme',
+        bento_custom_title: 'Özel Sesler ve Görseller',
+        bento_custom_desc: 'Her tuşa özel ses dosyası (.mp3, .wav) atayabilir, kendi emojilerinizi veya şeffaf PNG görsellerinizi ekleyebilirsiniz.',
+
+        bento_sdk_tag: 'Genişletilebilirlik',
+        bento_sdk_title: 'İsteğe Bağlı Eklenti Desteği',
+        bento_sdk_desc: 'IsuDeck hafif bir çekirdekle gelir. İhtiyaç duyarsanız OBS Studio gibi eklentileri sonradan kolayca entegre edebilir; tuşlarınıza canlı rozetler kazandırabilir veya kendi eklentinizi yazabilirsiniz!',
+
+        comp_tag: 'Karşılaştırma',
+        comp_title: 'Farklı Yaklaşımlar, Ortak Amaç.',
+        comp_desc: 'Fiziksel donanım konsolları harika cihazlardır; IsuDeck ise elinizdeki klavyeleri değerlendirerek aynı kontrol rahatlığını masanıza getiren açık kaynaklı bir yazılımdır.',
+        th_feature: 'Özellik',
+        th_hardware: 'Özel Donanım Konsolları',
+        row1_label: 'Gereken Cihaz',
+        row1_val1: 'Özel donanım konsolu',
+        row1_val2: 'Herhangi bir ikincil USB klavye veya numpad',
+        row2_label: 'Kullanılabilir Tuş Sayısı',
+        row2_val1: 'Cihazla sınırlı (genelde 15)',
+        row2_val2: 'Klavyenizin tüm tuşları (100+)',
+        row3_label: 'Kaynak Tüketimi',
+        row3_val1: '~200 - 500 MB RAM',
+        row3_val2: '<40 MB RAM (Rust)',
+        row4_label: 'Yazılım Lisansı',
+        row4_val1: 'Kapalı tescilli yazılım',
+        row4_val2: 'Tamamen açık kaynak ve ücretsiz',
+
+        steps_tag: 'Kurulum',
+        steps_title: '3 basit adımda başlayın.',
+        step1_title: 'Uygulamayı Açın',
+        step1_desc: 'Kurulum sihirbazı yok. İndirdiğiniz .exe dosyasını doğrudan çalıştırın.',
+        step2_title: 'Klavyenizi Bağlayın',
+        step2_desc: 'Kullanmak istediğiniz USB klavyeyi veya numpad\'i bilgisayara takın.',
+        step3_title: 'Tuşlarınızı Atayın',
+        step3_desc: 'İstediğiniz tuşa tıklayın; sesinizi, kısayolunuzu veya uygulamanızı belirleyin.',
+
+        cta_title: 'IsuDeck\'i hemen deneyin.',
+        cta_desc: 'Tamamen ücretsiz ve açık kaynaklıdır. İndirin ve ikinci klavyenizi bugün değerlendirin.',
+        cta_button: 'IsuDeck v1.0 İndir (.exe)',
+        footer_rights: 'Sanal Stream Deck ve Makro Aracı'
+      },
+      en: {
+        nav_about: 'How It Works',
+        nav_features: 'What You Can Do',
+        nav_comparison: 'Comparison',
+        nav_plugins: 'Plugins',
+        nav_download: 'Download',
+
+        hero_title: 'Turn your second keyboard into a virtual Stream Deck.',
+        hero_desc: 'Got a spare USB keyboard or numpad lying around? Plug it in and get a full-fledged virtual Stream Deck for streaming, gaming, audio, and productivity—without interfering with your primary keyboard!',
+        hero_cta_download: 'Download for Windows (v1.0)',
+        hero_cta_github: 'View Source Code',
+        hero_pill_1: 'Zero-Install Single .exe',
+        hero_pill_2: 'Ultra Lightweight with Rust',
+        hero_pill_3: 'Under 40 MB RAM',
+
+        mockup_profile_title: 'Profile 1 — Stream & Productivity',
+        btn_mic: 'Microphone',
+        btn_audio: 'Headphones',
+        btn_spotify: 'Spotify',
+        btn_terminal: 'Terminal',
+        btn_screenshot: 'Screenshot',
+        btn_projects: 'Projects',
+        btn_browser: 'Browser',
+        btn_hotkey: 'Hotkey',
+        btn_sound: 'Play Audio',
+        btn_profile: 'Profile',
+        btn_playpause: 'Play/Pause',
+        btn_lock: 'Lock Session',
+        btn_clipboard: 'Clipboard',
+        btn_game: 'Game Mode',
+        btn_settings: 'Settings',
+
+        about_tag: 'How It Works',
+        about_title: 'Your keys never collide.',
+        about_desc: 'Usually, plugging in two keyboards means they both type the same keys. IsuDeck intelligently separates them: keys pressed on your secondary keyboard won’t type letters or interrupt your game—they simply trigger your controls.',
+
+        card_old_title: 'Without IsuDeck',
+        card_old_heading: 'Key Collisions & Disruption',
+        card_old_desc: 'Normally, pressing a key on a second keyboard is treated by Windows as your main keyboard; your game character moves unintentionally, or unwanted letters fill your chat.',
+        card_old_point1: "• Key 'A' pressed on second keyboard",
+        card_old_point2: "• Your game character walks left (Unintended)",
+        card_old_point3: "• Letter 'a' typed into active chat window",
+
+        card_isu_title: 'With IsuDeck',
+        card_isu_heading: 'Independent Keyboards',
+        card_isu_desc: 'IsuDeck completely isolates the two keyboards. Keystrokes from your second keyboard never leak onto your screen; they instantly trigger your sound, manage your stream, or run your shortcut!',
+        card_isu_point1: "• Key 'A' pressed on second keyboard",
+        card_isu_point2: "• Detected without typing a letter to Windows",
+        card_isu_point3: "• Assigned control triggers quietly and instantly",
+
+        features_tag: 'Features',
+        features_title: 'The Virtual Stream Deck Experience',
+
+        bento_perf_tag: 'Fast & Lean',
+        bento_perf_title: 'Zero Bloat with Rust',
+        bento_perf_desc: 'Say goodbye to heavy apps consuming hundreds of megabytes of RAM. Thanks to its Rust backend, IsuDeck consumes under 40 MB of memory and never costs you a single frame in games.',
+
+        bento_port_tag: 'Portable',
+        bento_port_title: 'No Installation Required',
+        bento_port_desc: 'Zero registry clutter. Put the single .exe on a flash drive and run it directly on any Windows PC.',
+
+        bento_custom_tag: 'Customization',
+        bento_custom_title: 'Custom Sounds & Visuals',
+        bento_custom_desc: 'Assign custom audio files (.mp3, .wav) to any button, customize button background colors, and add emojis or transparent PNG icons.',
+
+        bento_sdk_tag: 'Extensibility',
+        bento_sdk_title: 'Optional Plugin Support',
+        bento_sdk_desc: 'IsuDeck ships with a lightweight core. When you need it, easily connect optional plugins like OBS Studio for dynamic status badges, or write your own plugins using standard JSON-RPC!',
+
+        comp_tag: 'Comparison',
+        comp_title: 'Different Approaches, Same Goal.',
+        comp_desc: 'Physical hardware decks are great gadgets; IsuDeck brings that same control experience right to your desk using keyboards you already own.',
+        th_feature: 'Feature',
+        th_hardware: 'Dedicated Hardware Decks',
+        row1_label: 'Hardware Required',
+        row1_val1: 'Proprietary deck hardware',
+        row1_val2: 'Any secondary USB keyboard or numpad',
+        row2_label: 'Available Keys',
+        row2_val1: 'Fixed to device (e.g. 15 keys)',
+        row2_val2: 'All keys on your keyboard (100+)',
+        row3_label: 'Memory Footprint',
+        row3_val1: '~200 - 500 MB RAM',
+        row3_val2: '<40 MB RAM (Rust core)',
+        row4_label: 'Software License',
+        row4_val1: 'Proprietary closed-source',
+        row4_val2: '100% open-source and free',
+
+        steps_tag: 'Quick Start',
+        steps_title: 'Get started in 3 simple steps.',
+        step1_title: 'Run the App',
+        step1_desc: 'No installer needed. Run the downloaded .exe directly.',
+        step2_title: 'Plug Your Keyboard',
+        step2_desc: 'Connect your secondary USB keyboard or numpad to your PC.',
+        step3_title: 'Assign Your Keys',
+        step3_desc: 'Click on any key, pick an action, sound or shortcut, and you are all set.',
+
+        cta_title: 'Try IsuDeck today.',
+        cta_desc: 'Completely free and open-source. Download now and put that extra keyboard to great use.',
+        cta_button: 'Download IsuDeck v1.0 (.exe)',
+        footer_rights: 'Virtual Stream Deck & Macro Tool'
+      }
+    };
+
+    let currentLang = localStorage.getItem('isudeck_site_lang') || 'tr';
+
+    function setLanguage(lang) {
+      currentLang = lang;
+      localStorage.setItem('isudeck_site_lang', lang);
+      document.documentElement.lang = lang;
+      
+      const dict = translations[lang];
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (dict && dict[key]) {
+          el.innerText = dict[key];
+        }
+      });
+
+      const langSelect = document.getElementById('langSelect');
+      if (langSelect && langSelect.value !== lang) {
+        langSelect.value = lang;
+      }
+    }
+
+    // Initialize language on load
+    document.addEventListener('DOMContentLoaded', () => {
+      setLanguage(currentLang);
+    });
+  </script>
+</body>
+</html>

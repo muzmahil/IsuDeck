@@ -1,0 +1,57 @@
+[package]
+name = "app"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+license = ""
+repository = ""
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.3", features = [] }
+
+[dependencies]
+# --- MEVCUT TAURI BAĞIMLILIKLARIN ---
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.9.5", features = ["tray-icon", "custom-protocol"] }
+tauri-plugin-log = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-process = "2.0.0"
+
+# --- YENİ EKLENEN GÜVENLİK VE İLETİŞİM PAKETLERİ ---
+
+# 1. Asenkron Motor
+tokio = { version = "1", features = ["full"] }
+
+# 2. Dinamik DLL Yükleyici (interception.dll ve eklentiler için)
+libloading = "0.8"
+
+# 3. Windows Native Giriş ve Klavye Simülasyonu
+windows-sys = { version = "0.59", features = [
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Shell",
+    "Win32_Foundation",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_System_Registry",
+    "Win32_Media_Multimedia",
+    "Win32_Media_Audio",
+    "Win32_System_Com"
+] }
+
+# 4. OBS WebSocket İletişimi
+tokio-tungstenite = { version = "0.24", features = ["connect"] }
+tungstenite = "0.24"
+sha2 = "0.10"
+base64 = "0.22"
+futures-util = "0.3"
+

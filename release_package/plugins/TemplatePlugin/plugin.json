@@ -1,0 +1,60 @@
+{
+  "name": "Template Plugin",
+  "version": "1.0.0",
+  "identifier": "com.isudeck.template",
+  "description": "Boş başlangıç eklenti şablonu. Kendi eklentinizi bu yapı üzerinden geliştirebilirsiniz.",
+  "author": "IsuDeck Developer",
+  "license": "MIT",
+  "icon": "icon.svg",
+  "executable": "plugin.exe",
+  "daemon": false,
+  "readme": "README.md",
+  "config": [
+    {
+      "key": "endpointUrl",
+      "type": "text",
+      "label": "Sunucu / Servis Adresi",
+      "placeholder": "http://localhost:8080 veya ws://localhost:4455",
+      "required": false,
+      "value": "127.0.0.1:4455"
+    },
+    {
+      "key": "apiKey",
+      "type": "password",
+      "label": "API Anahtarı / Şifre",
+      "placeholder": "Opsiyonel kimlik doğrulama anahtarı",
+      "required": false,
+      "value": ""
+    }
+  ],
+  "actions": [
+    {
+      "name": "template_action_simple",
+      "label": "Örnek Basit Aksiyon",
+      "icon": "icon.svg",
+      "fields": [
+        {
+          "key": "message",
+          "type": "text",
+          "label": "Gönderilecek Mesaj",
+          "placeholder": "Merhaba IsuDeck",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "template_action_dropdown",
+      "label": "Dinamik Liste Aksiyonu",
+      "icon": "icon.svg",
+      "fields": [
+        {
+          "key": "selectedItem",
+          "type": "dynamic_select",
+          "dataType": "GetItems",
+          "label": "Hedef Öğe Seçimi",
+          "required": true
+        }
+      ]
+    }
+  ]
+}
