@@ -52,6 +52,9 @@ const sanitizeHtml = (html) => {
   return doc.body.innerHTML;
 };
 
+// Global in-memory drag payload (bypasses WebView2 drag-drop data loss)
+let globalDragPayload = null;
+
 // Flat Monochrome SVG İkonlar
 const STATIC_ACTION_TYPES = {
   OPEN_APP: {
@@ -525,26 +528,59 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
 
   // Koşul ve Mantık Blokları için Kullanılabilir Değişkenler
   const availableVariables = useMemo(() => {
-    const userVars = Array.isArray(variables) ? variables.map(v => ({
-      value: v.name,
-      label: `$${v.name}`,
-      desc: v.description || (language === 'tr' ? 'Kullanıcı Değişkeni' : 'User Variable'),
-      kind: v.type || 'number'
-    })) : [];
+    const seen = new Set();
+    const userVars = [];
 
+    // 1. Mevcut aksiyon listesindeki SET_VARIABLE ve CHANGE_VARIABLE bloklarını tara
+    // Kullanıcının buton içine eklediği Set Variable değerleri anında burada listelenir!
+    if (Array.isArray(actions)) {
+      actions.forEach((a, aIdx) => {
+        const candidateName = a.variableName || a.name || a.varName;
+        if (typeof candidateName === 'string') {
+          const cleanName = candidateName.trim().replace(/^\$/, '');
+          if (cleanName && !seen.has(cleanName.toLowerCase())) {
+            seen.add(cleanName.toLowerCase());
+            const valPreview = a.value !== undefined && a.value !== '' ? ` (${language === 'tr' ? 'Değer:' : 'Value:'} ${a.value})` : '';
+            userVars.push({
+              value: cleanName,
+              label: `$${cleanName}`,
+              desc: `${language === 'tr' ? 'Aksiyon' : 'Action'} #${aIdx + 1}${valPreview}`,
+              kind: 'user'
+            });
+          }
+        }
+      });
+    }
+
+    // 2. Global / Mağaza Değişkenleri (variables.json)
+    if (Array.isArray(variables)) {
+      variables.forEach(v => {
+        if (!v?.name) return;
+        const cleanName = v.name.trim().replace(/^\$/, '');
+        if (cleanName && !seen.has(cleanName.toLowerCase())) {
+          seen.add(cleanName.toLowerCase());
+          const curVal = v.value !== undefined ? ` (${language === 'tr' ? 'Varsayılan:' : 'Default:'} ${v.value})` : '';
+          userVars.push({
+            value: cleanName,
+            label: `$${cleanName}`,
+            desc: (v.description || (language === 'tr' ? 'Kullanıcı Değişkeni' : 'User Variable')) + curVal,
+            kind: v.type || 'number'
+          });
+        }
+      });
+    }
+
+    // 3. Gerçek İşletim Sistemi Metrikleri (Hardcoded OBS kaldırıldı)
     const sysVars = [
       { value: '$sys.volume', label: '$sys.volume', desc: language === 'tr' ? 'Sistem Ses Seviyesi (0-100)' : 'Master Volume (0-100)', kind: 'number' },
       { value: '$sys.mute', label: '$sys.mute', desc: language === 'tr' ? 'Sessiz Durumu (true/false)' : 'Mute State (true/false)', kind: 'boolean' },
       { value: '$sys.cpu', label: '$sys.cpu', desc: language === 'tr' ? 'İşlemci Kullanımı (%)' : 'CPU Usage (%)', kind: 'number' },
       { value: '$sys.ram', label: '$sys.ram', desc: language === 'tr' ? 'Bellek Kullanımı (%)' : 'RAM Usage (%)', kind: 'number' },
-      { value: '$sys.battery', label: '$sys.battery', desc: language === 'tr' ? 'Pil Düzeyi (%)' : 'Battery Level (%)', kind: 'number' },
-      { value: '$sys.obsStreaming', label: '$sys.obsStreaming', desc: language === 'tr' ? 'OBS Yayın Durumu (true/false)' : 'OBS Streaming (true/false)', kind: 'boolean' },
-      { value: '$sys.obsRecording', label: '$sys.obsRecording', desc: language === 'tr' ? 'OBS Kayıt Durumu (true/false)' : 'OBS Recording (true/false)', kind: 'boolean' },
-      { value: '$sys.obsScene', label: '$sys.obsScene', desc: language === 'tr' ? 'OBS Aktif Sahne' : 'OBS Active Scene', kind: 'string' }
+      { value: '$sys.battery', label: '$sys.battery', desc: language === 'tr' ? 'Pil Düzeyi (%)' : 'Battery Level (%)', kind: 'number' }
     ];
 
     return { userVars, sysVars };
-  }, [variables, language]);
+  }, [variables, actions, language]);
 
   useEffect(() => {
     setIsInputRecording(isRecording && isOpen);
@@ -891,7 +927,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
       ...def.default
     };
     setActions(prev => prev.map(act => {
-      if (act.id === parentId) {
+      if (String(act.id) === String(parentId)) {
         const currentList = Array.isArray(act[listKey]) ? act[listKey] : [];
         return {
           ...act,
@@ -904,10 +940,10 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
 
   const updateNestedAction = (parentId, listKey, subActionId, field, value) => {
     setActions(prev => prev.map(act => {
-      if (act.id === parentId) {
+      if (String(act.id) === String(parentId)) {
         const currentList = Array.isArray(act[listKey]) ? act[listKey] : [];
         const updatedList = currentList.map(sub => {
-          if (sub.id === subActionId) {
+          if (String(sub.id) === String(subActionId)) {
             return { ...sub, [field]: value };
           }
           return sub;
@@ -920,9 +956,9 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
 
   const deleteNestedAction = (parentId, listKey, subActionId) => {
     setActions(prev => prev.map(act => {
-      if (act.id === parentId) {
+      if (String(act.id) === String(parentId)) {
         const currentList = Array.isArray(act[listKey]) ? act[listKey] : [];
-        return { ...act, [listKey]: currentList.filter(sub => sub.id !== subActionId) };
+        return { ...act, [listKey]: currentList.filter(sub => String(sub.id) !== String(subActionId)) };
       }
       return act;
     }));
@@ -930,7 +966,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
 
   const moveNestedAction = (parentId, listKey, subActionIdx, direction) => {
     setActions(prev => prev.map(act => {
-      if (act.id === parentId) {
+      if (String(act.id) === String(parentId)) {
         const currentList = [...(Array.isArray(act[listKey]) ? act[listKey] : [])];
         const targetIdx = subActionIdx + direction;
         if (targetIdx >= 0 && targetIdx < currentList.length) {
@@ -946,10 +982,10 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
 
   const toggleNestedActionExpand = (parentId, listKey, subActionId) => {
     setActions(prev => prev.map(act => {
-      if (act.id === parentId) {
+      if (String(act.id) === String(parentId)) {
         const currentList = Array.isArray(act[listKey]) ? act[listKey] : [];
         const updatedList = currentList.map(sub => {
-          if (sub.id === subActionId) {
+          if (String(sub.id) === String(subActionId)) {
             return { ...sub, expanded: !sub.expanded };
           }
           return sub;
@@ -962,17 +998,17 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
 
   const handleDragStartCatalog = (e, typeKey) => {
     try {
-      const payload = JSON.stringify({
-        source: 'catalog',
-        typeKey
-      });
-      e.dataTransfer.setData('text/plain', payload);
-      e.dataTransfer.setData('application/json', payload);
+      const payload = { source: 'catalog', typeKey };
+      globalDragPayload = payload;
+      const str = JSON.stringify(payload);
+      e.dataTransfer.setData('text/plain', str);
+      e.dataTransfer.setData('Text', str);
+      e.dataTransfer.setData('application/json', str);
       e.dataTransfer.effectAllowed = 'copyMove';
       if (typeof window !== 'undefined') {
-        window.__isudeck_drag = { source: 'catalog', typeKey };
+        window.__isudeck_drag = payload;
       }
-      setDraggingAction({ source: 'catalog', typeKey });
+      setDraggingAction(payload);
     } catch (err) {
       console.error('Drag start error:', err);
     }
@@ -980,20 +1016,23 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
 
   const handleDragStartExisting = (e, actionId, parentId = null, listKey = null, index = 0) => {
     try {
-      const payload = JSON.stringify({
+      const payload = {
         source: 'existing',
         actionId,
         parentId,
         listKey,
         index
-      });
-      e.dataTransfer.setData('text/plain', payload);
-      e.dataTransfer.setData('application/json', payload);
+      };
+      globalDragPayload = payload;
+      const str = JSON.stringify(payload);
+      e.dataTransfer.setData('text/plain', str);
+      e.dataTransfer.setData('Text', str);
+      e.dataTransfer.setData('application/json', str);
       e.dataTransfer.effectAllowed = 'copyMove';
       if (typeof window !== 'undefined') {
-        window.__isudeck_drag = { source: 'existing', actionId, parentId, listKey, index };
+        window.__isudeck_drag = payload;
       }
-      setDraggingAction({ source: 'existing', actionId, parentId, listKey, index });
+      setDraggingAction(payload);
     } catch (err) {
       console.error('Drag start existing error:', err);
     }
@@ -1002,21 +1041,30 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
   const handleDragEnd = () => {
     setActiveDropTarget(null);
     setDraggingAction(null);
-    if (typeof window !== 'undefined') {
-      window.__isudeck_drag = null;
-    }
+    setTimeout(() => {
+      globalDragPayload = null;
+      if (typeof window !== 'undefined') {
+        window.__isudeck_drag = null;
+      }
+    }, 400);
   };
 
   const getDroppedData = (e) => {
+    if (globalDragPayload) {
+      return globalDragPayload;
+    }
+    if (typeof window !== 'undefined' && window.__isudeck_drag) {
+      return window.__isudeck_drag;
+    }
     try {
-      const text = e.dataTransfer?.getData('text/plain') || e.dataTransfer?.getData('application/json');
+      const text = e.dataTransfer?.getData('application/json') ||
+                   e.dataTransfer?.getData('text/plain') ||
+                   e.dataTransfer?.getData('Text') ||
+                   e.dataTransfer?.getData('text');
       if (text) {
         return JSON.parse(text);
       }
     } catch (err) {}
-    if (typeof window !== 'undefined' && window.__isudeck_drag) {
-      return window.__isudeck_drag;
-    }
     return null;
   };
 
@@ -1024,7 +1072,10 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
     e.preventDefault();
     e.stopPropagation();
     const data = getDroppedData(e);
-    handleDragEnd();
+    globalDragPayload = null;
+    if (typeof window !== 'undefined') window.__isudeck_drag = null;
+    setActiveDropTarget(null);
+    setDraggingAction(null);
     if (!data) return;
 
     try {
@@ -1032,10 +1083,10 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
         addAction(data.typeKey);
       } else if (data.source === 'existing' && data.parentId && data.listKey) {
         // Move from nested slot to main actions list
-        const parent = actions.find(a => a.id === data.parentId);
+        const parent = actions.find(a => String(a.id) === String(data.parentId));
         if (!parent) return;
         const subList = Array.isArray(parent[data.listKey]) ? parent[data.listKey] : [];
-        const itemToMove = subList.find(s => s.id === data.actionId);
+        const itemToMove = subList.find(s => String(s.id) === String(data.actionId));
         if (!itemToMove) return;
 
         deleteNestedAction(data.parentId, data.listKey, data.actionId);
@@ -1050,7 +1101,10 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
     e.preventDefault();
     e.stopPropagation();
     const data = getDroppedData(e);
-    handleDragEnd();
+    globalDragPayload = null;
+    if (typeof window !== 'undefined') window.__isudeck_drag = null;
+    setActiveDropTarget(null);
+    setDraggingAction(null);
     if (!data) return;
 
     try {
@@ -1059,23 +1113,23 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
         if (!def || def.isBlock) return; // Prevent nesting blocks inside blocks
         addNestedAction(parentId, listKey, data.typeKey);
       } else if (data.source === 'existing') {
-        if (data.parentId === parentId && data.listKey === listKey) {
+        if (String(data.parentId) === String(parentId) && data.listKey === listKey) {
           return;
         }
         if (data.parentId && data.listKey) {
           setActions(prev => {
-            const oldParent = prev.find(a => a.id === data.parentId);
+            const oldParent = prev.find(a => String(a.id) === String(data.parentId));
             if (!oldParent) return prev;
             const oldList = Array.isArray(oldParent[data.listKey]) ? oldParent[data.listKey] : [];
-            const itemToMove = oldList.find(s => s.id === data.actionId);
+            const itemToMove = oldList.find(s => String(s.id) === String(data.actionId));
             if (!itemToMove) return prev;
 
             return prev.map(a => {
-              if (a.id === data.parentId) {
-                const filtered = (Array.isArray(a[data.listKey]) ? a[data.listKey] : []).filter(s => s.id !== data.actionId);
+              if (String(a.id) === String(data.parentId)) {
+                const filtered = (Array.isArray(a[data.listKey]) ? a[data.listKey] : []).filter(s => String(s.id) !== String(data.actionId));
                 return { ...a, [data.listKey]: filtered };
               }
-              if (a.id === parentId) {
+              if (String(a.id) === String(parentId)) {
                 const currentList = Array.isArray(a[listKey]) ? a[listKey] : [];
                 return {
                   ...a,
@@ -1087,13 +1141,13 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
           });
         } else {
           setActions(prev => {
-            const itemToMove = prev.find(a => a.id === data.actionId);
+            const itemToMove = prev.find(a => String(a.id) === String(data.actionId));
             if (!itemToMove) return prev;
             const def = ACTION_TYPES[itemToMove.definitionId] || ACTION_TYPES[itemToMove.type];
             if (def?.isBlock) return prev;
 
-            return prev.filter(a => a.id !== data.actionId).map(a => {
-              if (a.id === parentId) {
+            return prev.filter(a => String(a.id) !== String(data.actionId)).map(a => {
+              if (String(a.id) === String(parentId)) {
                 const currentList = Array.isArray(a[listKey]) ? a[listKey] : [];
                 return {
                   ...a,
@@ -1429,8 +1483,16 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
           setActiveDropTarget(targetKey);
         }}
         onDragLeave={(e) => {
-          if (e.currentTarget.contains(e.relatedTarget)) return;
-          if (activeDropTarget === targetKey) setActiveDropTarget(null);
+          e.preventDefault();
+          const rect = e.currentTarget.getBoundingClientRect();
+          if (
+            e.clientX <= rect.left ||
+            e.clientX >= rect.right ||
+            e.clientY <= rect.top ||
+            e.clientY >= rect.bottom
+          ) {
+            if (activeDropTarget === targetKey) setActiveDropTarget(null);
+          }
         }}
         onDrop={(e) => handleDropOnSlot(e, parentAct.id, listKey)}
         className={`pl-4 pr-3 py-2.5 border-l-[4px] ${theme.spineColor} ${theme.bgCavity} transition-all duration-150 relative ${
@@ -1539,8 +1601,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
             setActiveDropTarget(targetKey);
           }}
           onDragLeave={(e) => {
-            if (e.currentTarget.contains(e.relatedTarget)) return;
-            if (activeDropTarget === targetKey) setActiveDropTarget(null);
+            e.stopPropagation();
           }}
           onDrop={(e) => handleDropOnSlot(e, parentAct.id, listKey)}
           className={`p-3 rounded-xl border-2 border-dashed transition-all duration-150 flex flex-wrap items-center justify-between gap-2 cursor-pointer ${
@@ -2391,7 +2452,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                           </optgroup>
 
                                           <option value="__custom__">
-                                            ✏️ {t('action_types.IF_CONDITION.custom_variable', language)}
+                                            {t('action_types.IF_CONDITION.custom_variable', language)}
                                           </option>
                                         </select>
                                         <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-400">
@@ -2438,7 +2499,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                     />
 
                                     {/* Hızlı Seçim Butonları */}
-                                    {act.leftOperand === '$sys.mute' || act.leftOperand === '$sys.obsStreaming' || act.leftOperand === '$sys.obsRecording' ? (
+                                    {act.leftOperand === '$sys.mute' ? (
                                       <div className="flex items-center gap-1 border-l border-white/10 pl-1.5">
                                         <button
                                           type="button"

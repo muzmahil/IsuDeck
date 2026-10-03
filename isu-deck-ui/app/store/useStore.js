@@ -72,10 +72,7 @@ const useStore = create((set, get) => ({
     ram: 42,
     time24: '12:00',
     time12: '12:00 PM',
-    battery: 100,
-    obsScene: '',
-    obsStreaming: false,
-    obsRecording: false
+    battery: 100
   },
 
   loadVariables: async () => {
