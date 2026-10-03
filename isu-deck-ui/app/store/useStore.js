@@ -154,7 +154,8 @@ const useStore = create((set, get) => ({
         const metricKey = trimmed.slice(5);
         return systemMetrics[metricKey] !== undefined ? systemMetrics[metricKey] : '';
       }
-      const matchingVar = variables.find(v => v.name.toLowerCase() === trimmed.toLowerCase());
+      const cleanVar = trimmed.startsWith('$') ? trimmed.slice(1) : trimmed;
+      const matchingVar = variables.find(v => v.name.toLowerCase() === cleanVar.toLowerCase() || v.name.toLowerCase() === trimmed.toLowerCase());
       if (matchingVar) {
         return matchingVar.value;
       }

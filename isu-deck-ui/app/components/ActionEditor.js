@@ -353,7 +353,7 @@ const STATIC_ACTION_TYPES = {
 };
 
 export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, initialData, existingButtons = [], onStealBinding, profiles = [] }) {
-  const { lastMessage, setIsInputRecording, t, language, plugins, sendToEngine, customSounds, settings } = useStore();
+  const { lastMessage, setIsInputRecording, t, language, plugins, sendToEngine, customSounds, settings, variables, systemMetrics } = useStore();
   const accentColor = settings?.accentColor || '#3b82f6';
   const [activeTab, setActiveTab] = useState('appearance');
 
@@ -522,6 +522,29 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
     });
     return Array.from(cats);
   }, [allPluginIcons]);
+
+  // Koşul ve Mantık Blokları için Kullanılabilir Değişkenler
+  const availableVariables = useMemo(() => {
+    const userVars = Array.isArray(variables) ? variables.map(v => ({
+      value: v.name,
+      label: `$${v.name}`,
+      desc: v.description || (language === 'tr' ? 'Kullanıcı Değişkeni' : 'User Variable'),
+      kind: v.type || 'number'
+    })) : [];
+
+    const sysVars = [
+      { value: '$sys.volume', label: '$sys.volume', desc: language === 'tr' ? 'Sistem Ses Seviyesi (0-100)' : 'Master Volume (0-100)', kind: 'number' },
+      { value: '$sys.mute', label: '$sys.mute', desc: language === 'tr' ? 'Sessiz Durumu (true/false)' : 'Mute State (true/false)', kind: 'boolean' },
+      { value: '$sys.cpu', label: '$sys.cpu', desc: language === 'tr' ? 'İşlemci Kullanımı (%)' : 'CPU Usage (%)', kind: 'number' },
+      { value: '$sys.ram', label: '$sys.ram', desc: language === 'tr' ? 'Bellek Kullanımı (%)' : 'RAM Usage (%)', kind: 'number' },
+      { value: '$sys.battery', label: '$sys.battery', desc: language === 'tr' ? 'Pil Düzeyi (%)' : 'Battery Level (%)', kind: 'number' },
+      { value: '$sys.obsStreaming', label: '$sys.obsStreaming', desc: language === 'tr' ? 'OBS Yayın Durumu (true/false)' : 'OBS Streaming (true/false)', kind: 'boolean' },
+      { value: '$sys.obsRecording', label: '$sys.obsRecording', desc: language === 'tr' ? 'OBS Kayıt Durumu (true/false)' : 'OBS Recording (true/false)', kind: 'boolean' },
+      { value: '$sys.obsScene', label: '$sys.obsScene', desc: language === 'tr' ? 'OBS Aktif Sahne' : 'OBS Active Scene', kind: 'string' }
+    ];
+
+    return { userVars, sysVars };
+  }, [variables, language]);
 
   useEffect(() => {
     setIsInputRecording(isRecording && isOpen);
@@ -1040,39 +1063,46 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
           return;
         }
         if (data.parentId && data.listKey) {
-          const oldParent = actions.find(a => a.id === data.parentId);
-          if (!oldParent) return;
-          const oldList = Array.isArray(oldParent[data.listKey]) ? oldParent[data.listKey] : [];
-          const itemToMove = oldList.find(s => s.id === data.actionId);
-          if (!itemToMove) return;
+          setActions(prev => {
+            const oldParent = prev.find(a => a.id === data.parentId);
+            if (!oldParent) return prev;
+            const oldList = Array.isArray(oldParent[data.listKey]) ? oldParent[data.listKey] : [];
+            const itemToMove = oldList.find(s => s.id === data.actionId);
+            if (!itemToMove) return prev;
 
-          deleteNestedAction(data.parentId, data.listKey, data.actionId);
-          setActions(prev => prev.map(a => {
-            if (a.id === parentId) {
-              const currentList = Array.isArray(a[listKey]) ? a[listKey] : [];
-              return {
-                ...a,
-                [listKey]: [...currentList, { ...itemToMove, id: `sub_${Date.now()}_${Math.random().toString(36).substr(2, 5)}` }]
-              };
-            }
-            return a;
-          }));
+            return prev.map(a => {
+              if (a.id === data.parentId) {
+                const filtered = (Array.isArray(a[data.listKey]) ? a[data.listKey] : []).filter(s => s.id !== data.actionId);
+                return { ...a, [data.listKey]: filtered };
+              }
+              if (a.id === parentId) {
+                const currentList = Array.isArray(a[listKey]) ? a[listKey] : [];
+                return {
+                  ...a,
+                  [listKey]: [...currentList, { ...itemToMove, id: `sub_${Date.now()}_${Math.random().toString(36).substr(2, 5)}` }]
+                };
+              }
+              return a;
+            });
+          });
         } else {
-          const itemToMove = actions.find(a => a.id === data.actionId);
-          if (!itemToMove) return;
-          const def = ACTION_TYPES[itemToMove.definitionId];
-          if (def?.isBlock) return;
+          setActions(prev => {
+            const itemToMove = prev.find(a => a.id === data.actionId);
+            if (!itemToMove) return prev;
+            const def = ACTION_TYPES[itemToMove.definitionId] || ACTION_TYPES[itemToMove.type];
+            if (def?.isBlock) return prev;
 
-          setActions(prev => prev.filter(a => a.id !== data.actionId).map(a => {
-            if (a.id === parentId) {
-              const currentList = Array.isArray(a[listKey]) ? a[listKey] : [];
-              return {
-                ...a,
-                [listKey]: [...currentList, { ...itemToMove, id: `sub_${Date.now()}_${Math.random().toString(36).substr(2, 5)}` }]
-              };
-            }
-            return a;
-          }));
+            return prev.filter(a => a.id !== data.actionId).map(a => {
+              if (a.id === parentId) {
+                const currentList = Array.isArray(a[listKey]) ? a[listKey] : [];
+                return {
+                  ...a,
+                  [listKey]: [...currentList, { ...itemToMove, id: `sub_${Date.now()}_${Math.random().toString(36).substr(2, 5)}` }]
+                };
+              }
+              return a;
+            });
+          });
         }
       }
     } catch (err) {
@@ -1386,7 +1416,27 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
     const isHovered = activeDropTarget === targetKey;
 
     return (
-      <div className={`pl-4 pr-3 py-2 border-l-[6px] ${theme.spineColor} ${theme.bgCavity} transition-all duration-150`}>
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          e.dataTransfer.dropEffect = 'copy';
+          if (activeDropTarget !== targetKey) setActiveDropTarget(targetKey);
+        }}
+        onDragEnter={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setActiveDropTarget(targetKey);
+        }}
+        onDragLeave={(e) => {
+          if (e.currentTarget.contains(e.relatedTarget)) return;
+          if (activeDropTarget === targetKey) setActiveDropTarget(null);
+        }}
+        onDrop={(e) => handleDropOnSlot(e, parentAct.id, listKey)}
+        className={`pl-4 pr-3 py-2.5 border-l-[4px] ${theme.spineColor} ${theme.bgCavity} transition-all duration-150 relative ${
+          isHovered ? 'bg-blue-500/[0.08] ring-1 ring-blue-500/40' : ''
+        }`}
+      >
         {/* Sub-actions List */}
         {subList.length > 0 && (
           <div className="space-y-2 mb-2">
@@ -1395,14 +1445,20 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
               return (
                 <div
                   key={subAct.id}
-                  draggable={true}
-                  onDragStart={(e) => handleDragStartExisting(e, subAct.id, parentAct.id, listKey, subIdx)}
-                  onDragEnd={handleDragEnd}
                   className="bg-[#18181c] border border-white/10 hover:border-white/20 rounded-xl p-2.5 text-xs space-y-2 shadow-sm transition-all group/sub"
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-zinc-500 hover:text-zinc-300 cursor-grab active:cursor-grabbing font-mono text-sm leading-none shrink-0" title="Sürükle">
+                      <span
+                        draggable={true}
+                        onDragStart={(e) => {
+                          e.stopPropagation();
+                          handleDragStartExisting(e, subAct.id, parentAct.id, listKey, subIdx);
+                        }}
+                        onDragEnd={handleDragEnd}
+                        className="text-zinc-500 hover:text-white cursor-grab active:cursor-grabbing font-mono text-sm leading-none shrink-0 p-0.5 rounded hover:bg-white/5"
+                        title="Sürükle"
+                      >
                         ⠿
                       </span>
                       {subDef?.fields?.length > 0 && (
@@ -1487,17 +1543,17 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
             if (activeDropTarget === targetKey) setActiveDropTarget(null);
           }}
           onDrop={(e) => handleDropOnSlot(e, parentAct.id, listKey)}
-          className={`p-3 rounded-xl border-2 border-dashed transition-all duration-200 flex flex-wrap items-center justify-between gap-2 cursor-pointer ${
+          className={`p-3 rounded-xl border-2 border-dashed transition-all duration-150 flex flex-wrap items-center justify-between gap-2 cursor-pointer ${
             isHovered
-              ? `${theme.bgActive} ${theme.borderHover} shadow-[0_0_25px_${theme.glowColor}] scale-[1.01]`
-              : 'border-white/15 hover:border-white/25 bg-black/30 hover:bg-black/40'
+              ? 'border-blue-400 bg-blue-500/15 shadow-[0_0_20px_rgba(59,130,246,0.2)]'
+              : 'border-white/10 hover:border-white/20 bg-black/20 hover:bg-black/30'
           }`}
         >
           <div className="flex items-center gap-2 text-xs font-medium pointer-events-none">
-            <svg className={`w-4 h-4 transition-transform ${isHovered ? 'scale-125 animate-bounce text-white' : 'text-zinc-400'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg className={`w-4 h-4 transition-transform ${isHovered ? 'scale-125 animate-bounce text-blue-400' : 'text-zinc-500'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M8 21h8"/>
             </svg>
-            <span className={isHovered ? 'text-white font-bold' : 'text-zinc-300'}>
+            <span className={isHovered ? 'text-blue-300 font-bold' : 'text-zinc-400'}>
               {isHovered ? t('action_types.IF_CONDITION.drop_zone_hover', language) : (subList.length === 0 ? theme.emptyHint : t('action_types.IF_CONDITION.drag_hint', language))}
             </span>
           </div>
@@ -1511,7 +1567,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                   addNestedAction(parentAct.id, listKey, e.target.value);
                 }
               }}
-              className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white border border-white/10 rounded-lg px-2.5 py-1 text-xs font-medium outline-none transition-all cursor-pointer appearance-none pr-6"
+              className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white border border-white/10 rounded-lg px-2.5 py-1 text-xs font-medium outline-none transition-all cursor-pointer appearance-none pr-6 shadow-sm"
             >
               <option value="" disabled>{t('action_types.IF_CONDITION.quick_add', language)}</option>
               {Object.entries(getGroupedActions()).map(([cat, acts]) => {
@@ -2253,34 +2309,96 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                           return (
                             <div
                               key={act.id}
-                              draggable={true}
-                              onDragStart={(e) => handleDragStartExisting(e, act.id, null, null, idx)}
-                              onDragEnd={handleDragEnd}
-                              className="flex flex-col rounded-2xl overflow-hidden border-2 border-amber-500/70 bg-[#151518] shadow-lg transition-all group"
+                              className="flex flex-col rounded-2xl overflow-hidden border border-white/10 bg-[#161619] shadow-lg transition-all group"
                             >
                               {/* ÜST KOL (TOP SHOULDER OF C-HOOK) */}
-                              <div className="bg-[#1c1a16] border-b-2 border-amber-500/60 p-2.5 sm:p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+                              <div className="bg-[#1c1c20] border-b border-white/10 p-2.5 sm:p-3 flex flex-wrap items-center justify-between gap-2.5 text-xs">
                                 <div className="flex items-center gap-2 flex-wrap min-w-0">
-                                  <span className="text-zinc-500 group-hover:text-zinc-300 cursor-grab active:cursor-grabbing font-mono text-sm leading-none shrink-0" title="Sürükle">
+                                  <span
+                                    draggable={true}
+                                    onDragStart={(e) => {
+                                      e.stopPropagation();
+                                      handleDragStartExisting(e, act.id, null, null, idx);
+                                    }}
+                                    onDragEnd={handleDragEnd}
+                                    className="text-zinc-500 hover:text-white cursor-grab active:cursor-grabbing font-mono text-sm leading-none shrink-0 p-1 rounded hover:bg-white/5"
+                                    title="Sürükle"
+                                  >
                                     ⠿
                                   </span>
-                                  <span className="w-5 h-5 rounded bg-amber-500/20 text-amber-300 text-xs flex items-center justify-center font-bold">
+                                  <span className="w-5 h-5 rounded bg-zinc-800 text-zinc-300 text-xs flex items-center justify-center font-bold font-mono">
                                     {idx + 1}
                                   </span>
-                                  <span className="px-2.5 py-1 rounded-lg bg-amber-500 text-black font-black tracking-wider text-xs uppercase shadow-sm">
+                                  <span className="px-2.5 py-1 rounded-lg bg-zinc-700 text-white font-extrabold tracking-wider text-xs uppercase shadow-sm border border-white/10">
                                     {t('action_types.IF_CONDITION.if_keyword', language)}
                                   </span>
 
-                                  {/* Değişken Girişi */}
-                                  <div className="flex items-center bg-[#121214] border border-amber-500/30 rounded-lg px-2.5 py-1 focus-within:border-amber-400 shadow-inner">
-                                    <span className="text-amber-400 mr-1 text-[11px] font-mono font-bold">$</span>
-                                    <input
-                                      type="text"
-                                      value={act.leftOperand || ''}
-                                      onChange={(e) => updateAction(act.id, 'leftOperand', e.target.value)}
-                                      placeholder="vol"
-                                      className="bg-transparent text-white outline-none w-20 sm:w-24 text-xs font-mono font-semibold"
-                                    />
+                                  {/* Değişken Seçici (Dropdown + Özel Değişken Seçeneği) */}
+                                  <div className="flex items-center gap-1">
+                                    {act.isCustomVar ? (
+                                      <div className="flex items-center bg-[#101012] border border-white/15 focus-within:border-blue-400 rounded-lg px-2 py-1 shadow-inner">
+                                        <span className="text-blue-400 mr-1 text-[11px] font-mono font-bold">$</span>
+                                        <input
+                                          type="text"
+                                          value={act.leftOperand || ''}
+                                          onChange={(e) => updateAction(act.id, 'leftOperand', e.target.value)}
+                                          placeholder="vol"
+                                          className="bg-transparent text-white outline-none w-24 text-xs font-mono font-semibold"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => updateAction(act.id, 'isCustomVar', false)}
+                                          className="text-zinc-500 hover:text-zinc-300 text-[10px] ml-1 px-1 rounded hover:bg-white/10 cursor-pointer"
+                                          title={language === 'tr' ? 'Listeden Seç' : 'Choose from list'}
+                                        >
+                                          ✕
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="relative">
+                                        <select
+                                          value={act.leftOperand || ''}
+                                          onChange={(e) => {
+                                            if (e.target.value === '__custom__') {
+                                              updateAction(act.id, 'isCustomVar', true);
+                                              updateAction(act.id, 'leftOperand', '');
+                                            } else {
+                                              updateAction(act.id, 'leftOperand', e.target.value);
+                                            }
+                                          }}
+                                          className="bg-[#101012] border border-white/15 hover:border-white/25 focus:border-blue-400 rounded-lg px-2.5 py-1 text-xs text-zinc-100 font-semibold outline-none cursor-pointer appearance-none pr-6 shadow-inner max-w-[210px]"
+                                        >
+                                          <option value="" disabled>
+                                            {t('action_types.IF_CONDITION.select_variable', language)}
+                                          </option>
+
+                                          {availableVariables.userVars.length > 0 && (
+                                            <optgroup label={t('action_types.IF_CONDITION.user_variables', language)}>
+                                              {availableVariables.userVars.map(v => (
+                                                <option key={v.value} value={v.value}>
+                                                  {v.label} - {v.desc}
+                                                </option>
+                                              ))}
+                                            </optgroup>
+                                          )}
+
+                                          <optgroup label={t('action_types.IF_CONDITION.system_variables', language)}>
+                                            {availableVariables.sysVars.map(s => (
+                                              <option key={s.value} value={s.value}>
+                                                {s.label} ({s.desc})
+                                              </option>
+                                            ))}
+                                          </optgroup>
+
+                                          <option value="__custom__">
+                                            ✏️ {t('action_types.IF_CONDITION.custom_variable', language)}
+                                          </option>
+                                        </select>
+                                        <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-400">
+                                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg>
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
 
                                   {/* Koşul Operatörü */}
@@ -2288,7 +2406,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                     <select
                                       value={act.operator || '=='}
                                       onChange={(e) => updateAction(act.id, 'operator', e.target.value)}
-                                      className="bg-[#121214] border border-amber-500/30 hover:border-amber-400 rounded-lg px-2.5 py-1 text-xs text-amber-300 font-bold outline-none cursor-pointer appearance-none pr-6 shadow-inner"
+                                      className="bg-[#101012] border border-white/15 hover:border-white/25 focus:border-blue-400 rounded-lg px-2.5 py-1 text-xs text-zinc-200 font-bold outline-none cursor-pointer appearance-none pr-6 shadow-inner"
                                     >
                                       {[
                                         { value: '==', labelKey: 'action_types.operators.eq' },
@@ -2304,23 +2422,62 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                         </option>
                                       ))}
                                     </select>
-                                    <div className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-amber-400">
+                                    <div className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-400">
                                       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg>
                                     </div>
                                   </div>
 
-                                  {/* Karşılaştırma Değeri */}
-                                  <div className="flex items-center bg-[#121214] border border-amber-500/30 rounded-lg px-2.5 py-1 focus-within:border-amber-400 shadow-inner">
+                                  {/* Karşılaştırma Değeri & Hazır Değer Butonları */}
+                                  <div className="flex items-center gap-1.5 bg-[#101012] border border-white/15 focus-within:border-blue-400 rounded-lg px-2 py-1 shadow-inner">
                                     <input
                                       type="text"
                                       value={act.rightOperand || ''}
                                       onChange={(e) => updateAction(act.id, 'rightOperand', e.target.value)}
-                                      placeholder="0"
+                                      placeholder={t('action_types.IF_CONDITION.value_placeholder', language)}
                                       className="bg-transparent text-white outline-none w-16 sm:w-20 text-xs font-mono font-semibold"
                                     />
+
+                                    {/* Hızlı Seçim Butonları */}
+                                    {act.leftOperand === '$sys.mute' || act.leftOperand === '$sys.obsStreaming' || act.leftOperand === '$sys.obsRecording' ? (
+                                      <div className="flex items-center gap-1 border-l border-white/10 pl-1.5">
+                                        <button
+                                          type="button"
+                                          onClick={() => updateAction(act.id, 'rightOperand', 'true')}
+                                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors cursor-pointer ${
+                                            act.rightOperand === 'true' ? 'bg-blue-600 text-white' : 'bg-white/5 text-zinc-400 hover:text-white'
+                                          }`}
+                                        >
+                                          true
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => updateAction(act.id, 'rightOperand', 'false')}
+                                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors cursor-pointer ${
+                                            act.rightOperand === 'false' ? 'bg-blue-600 text-white' : 'bg-white/5 text-zinc-400 hover:text-white'
+                                          }`}
+                                        >
+                                          false
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="flex items-center gap-1 border-l border-white/10 pl-1.5">
+                                        {['0', '50', '100'].map(val => (
+                                          <button
+                                            key={val}
+                                            type="button"
+                                            onClick={() => updateAction(act.id, 'rightOperand', val)}
+                                            className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-colors cursor-pointer ${
+                                              act.rightOperand === val ? 'bg-blue-600 text-white' : 'bg-white/5 text-zinc-400 hover:text-white'
+                                            }`}
+                                          >
+                                            {val}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
                                   </div>
 
-                                  <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 font-bold text-xs uppercase tracking-wide">
+                                  <span className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-bold text-xs uppercase tracking-wide border border-white/5">
                                     {t('action_types.IF_CONDITION.then_keyword', language)}
                                   </span>
                                 </div>
@@ -2332,7 +2489,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                     onClick={() => updateAction(act.id, 'hasElse', !act.hasElse)}
                                     className={`px-2 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
                                       act.hasElse
-                                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                                        ? 'bg-blue-600/20 text-blue-300 border border-blue-500/40'
                                         : 'bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white border border-white/5'
                                     }`}
                                   >
@@ -2347,20 +2504,20 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
 
                               {/* BİRİNCİ KANCA AĞZI: THEN / İSE DALI */}
                               {renderNestedSlot(act, 'thenActions', {
-                                spineColor: 'border-amber-500',
-                                bgCavity: 'bg-amber-500/[0.04]',
-                                borderHover: 'border-amber-400',
-                                bgActive: 'bg-amber-500/20',
-                                glowColor: 'rgba(245,158,11,0.3)',
+                                spineColor: 'border-zinc-600',
+                                bgCavity: 'bg-white/[0.02]',
+                                borderHover: 'border-blue-400',
+                                bgActive: 'bg-blue-500/10',
+                                glowColor: 'rgba(59,130,246,0.15)',
                                 emptyHint: t('action_types.IF_CONDITION.empty_then', language)
                               })}
 
                               {/* ORTA KOL: DEĞİLSE / ELSE (varsa) */}
                               {act.hasElse && (
                                 <>
-                                  <div className="bg-[#1c1a16] border-y-2 border-amber-500/60 p-2 sm:p-2.5 flex items-center justify-between text-xs">
+                                  <div className="bg-[#1c1c20] border-y border-white/10 p-2.5 flex items-center justify-between text-xs">
                                     <div className="flex items-center gap-2">
-                                      <span className="px-2.5 py-1 rounded-lg bg-amber-500/90 text-black font-black tracking-wider text-xs uppercase shadow-sm">
+                                      <span className="px-2.5 py-1 rounded-lg bg-zinc-700 text-zinc-200 font-extrabold tracking-wider text-xs uppercase shadow-sm border border-white/10">
                                         {t('action_types.IF_CONDITION.else_keyword', language)}
                                       </span>
                                       <span className="text-zinc-400 text-xs">
@@ -2378,18 +2535,18 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
 
                                   {/* İKİNCİ KANCA AĞZI: ELSE DALI */}
                                   {renderNestedSlot(act, 'elseActions', {
-                                    spineColor: 'border-amber-500',
-                                    bgCavity: 'bg-amber-500/[0.03]',
-                                    borderHover: 'border-amber-400',
-                                    bgActive: 'bg-amber-500/20',
-                                    glowColor: 'rgba(245,158,11,0.3)',
+                                    spineColor: 'border-zinc-600',
+                                    bgCavity: 'bg-white/[0.015]',
+                                    borderHover: 'border-blue-400',
+                                    bgActive: 'bg-blue-500/10',
+                                    glowColor: 'rgba(59,130,246,0.15)',
                                     emptyHint: t('action_types.IF_CONDITION.empty_else', language)
                                   })}
                                 </>
                               )}
 
                               {/* ALT TABAN KAPANISI (BOTTOM CAP OF C-HOOK) */}
-                              <div className="bg-[#121214] border-t-2 border-amber-500/60 py-1.5 px-4 flex items-center justify-between text-[11px] font-mono text-amber-400/80">
+                              <div className="bg-[#141416] border-t border-white/10 py-1.5 px-4 flex items-center justify-between text-[11px] font-mono text-zinc-400">
                                 <span className="flex items-center gap-1.5">
                                   <span>└──</span>
                                   <span className="font-bold tracking-wider">{t('action_types.IF_CONDITION.end_if', language)}</span>
@@ -2406,26 +2563,32 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                           return (
                             <div
                               key={act.id}
-                              draggable={true}
-                              onDragStart={(e) => handleDragStartExisting(e, act.id, null, null, idx)}
-                              onDragEnd={handleDragEnd}
-                              className="flex flex-col rounded-2xl overflow-hidden border-2 border-blue-500/70 bg-[#13151b] shadow-lg transition-all group"
+                              className="flex flex-col rounded-2xl overflow-hidden border border-white/10 bg-[#161619] shadow-lg transition-all group"
                             >
                               {/* ÜST KOL (TOP SHOULDER OF LOOP C-HOOK) */}
-                              <div className="bg-[#131924] border-b-2 border-blue-500/60 p-2.5 sm:p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+                              <div className="bg-[#1c1c20] border-b border-white/10 p-2.5 sm:p-3 flex flex-wrap items-center justify-between gap-2.5 text-xs">
                                 <div className="flex items-center gap-2 flex-wrap min-w-0">
-                                  <span className="text-zinc-500 group-hover:text-zinc-300 cursor-grab active:cursor-grabbing font-mono text-sm leading-none shrink-0" title="Sürükle">
+                                  <span
+                                    draggable={true}
+                                    onDragStart={(e) => {
+                                      e.stopPropagation();
+                                      handleDragStartExisting(e, act.id, null, null, idx);
+                                    }}
+                                    onDragEnd={handleDragEnd}
+                                    className="text-zinc-500 hover:text-white cursor-grab active:cursor-grabbing font-mono text-sm leading-none shrink-0 p-1 rounded hover:bg-white/5"
+                                    title="Sürükle"
+                                  >
                                     ⠿
                                   </span>
-                                  <span className="w-5 h-5 rounded bg-blue-500/20 text-blue-300 text-xs flex items-center justify-center font-bold">
+                                  <span className="w-5 h-5 rounded bg-zinc-800 text-zinc-300 text-xs flex items-center justify-center font-bold font-mono">
                                     {idx + 1}
                                   </span>
-                                  <span className="px-2.5 py-1 rounded-lg bg-blue-500 text-white font-black tracking-wider text-xs uppercase shadow-sm">
+                                  <span className="px-2.5 py-1 rounded-lg bg-zinc-700 text-white font-extrabold tracking-wider text-xs uppercase shadow-sm border border-white/10">
                                     {t('action_types.LOOP_REPEAT.loop_keyword', language)}
                                   </span>
 
                                   {/* Tekrar Sayısı */}
-                                  <div className="flex items-center bg-[#101217] border border-blue-500/30 rounded-lg px-2.5 py-1 focus-within:border-blue-400 shadow-inner">
+                                  <div className="flex items-center bg-[#101012] border border-white/15 focus-within:border-blue-400 rounded-lg px-2.5 py-1 shadow-inner">
                                     <input
                                       type="number"
                                       min={1}
@@ -2434,11 +2597,11 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                       onChange={(e) => updateAction(act.id, 'count', parseInt(e.target.value) || 1)}
                                       className="bg-transparent text-white font-bold outline-none w-10 text-xs text-center font-mono"
                                     />
-                                    <span className="text-blue-300 text-xs font-semibold ml-1.5">{t('action_types.LOOP_REPEAT.times', language)}</span>
+                                    <span className="text-zinc-300 text-xs font-semibold ml-1.5">{t('action_types.LOOP_REPEAT.times', language)}</span>
                                   </div>
 
                                   {/* Gecikme */}
-                                  <div className="flex items-center bg-[#101217] border border-blue-500/30 rounded-lg px-2.5 py-1 focus-within:border-blue-400 shadow-inner">
+                                  <div className="flex items-center bg-[#101012] border border-white/15 focus-within:border-blue-400 rounded-lg px-2.5 py-1 shadow-inner">
                                     <span className="text-zinc-400 text-xs mr-1.5">{t('action_types.LOOP_REPEAT.delay', language)}:</span>
                                     <input
                                       type="number"
@@ -2462,16 +2625,16 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
 
                               {/* DÖNGÜ KANCA AĞZI: LOOP ACTIONS */}
                               {renderNestedSlot(act, 'loopActions', {
-                                spineColor: 'border-blue-500',
-                                bgCavity: 'bg-blue-500/[0.04]',
+                                spineColor: 'border-zinc-600',
+                                bgCavity: 'bg-white/[0.02]',
                                 borderHover: 'border-blue-400',
-                                bgActive: 'bg-blue-500/20',
-                                glowColor: 'rgba(59,130,246,0.3)',
+                                bgActive: 'bg-blue-500/10',
+                                glowColor: 'rgba(59,130,246,0.15)',
                                 emptyHint: t('action_types.LOOP_REPEAT.empty_loop', language)
                               })}
 
                               {/* DÖNGÜ ALT TABAN KAPANISI */}
-                              <div className="bg-[#0e1015] border-t-2 border-blue-500/60 py-1.5 px-4 flex items-center justify-between text-[11px] font-mono text-blue-400/80">
+                              <div className="bg-[#141416] border-t border-white/10 py-1.5 px-4 flex items-center justify-between text-[11px] font-mono text-zinc-400">
                                 <span className="flex items-center gap-1.5">
                                   <span>└──</span>
                                   <span className="font-bold tracking-wider">{t('action_types.LOOP_REPEAT.end_loop', language)}</span>
@@ -2487,14 +2650,20 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                         return (
                           <div
                             key={act.id}
-                            draggable={true}
-                            onDragStart={(e) => handleDragStartExisting(e, act.id, null, null, idx)}
-                            onDragEnd={handleDragEnd}
                             className="flex flex-col p-3 bg-[#1e1e1e] border border-white/10 hover:border-white/20 rounded-xl group transition-all shadow-md"
                           >
                             <div className="flex items-center justify-between mb-2">
                               <div className="flex items-center gap-2">
-                                <span className="text-zinc-600 group-hover:text-zinc-400 cursor-grab active:cursor-grabbing font-mono text-sm leading-none" title="Sürükle">
+                                <span
+                                  draggable={true}
+                                  onDragStart={(e) => {
+                                    e.stopPropagation();
+                                    handleDragStartExisting(e, act.id, null, null, idx);
+                                  }}
+                                  onDragEnd={handleDragEnd}
+                                  className="text-zinc-500 hover:text-white cursor-grab active:cursor-grabbing font-mono text-sm leading-none p-1 rounded hover:bg-white/5"
+                                  title="Sürükle"
+                                >
                                   ⠿
                                 </span>
                                 {actionDef.fields?.length > 0 && (
