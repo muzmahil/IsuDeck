@@ -436,6 +436,8 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
   const dynamicCache = useRef({});
   const inFlightRequests = useRef({});
   const initializedActions = useRef(new Set());
+  const [activeDropTarget, setActiveDropTarget] = useState(null); // 'main' or `${parentId}_${listKey}`
+  const [draggingAction, setDraggingAction] = useState(null);
 
   // Lucide İkon Filtreleme (Memoized for high performance)
   const filteredLucideIcons = useMemo(() => {
@@ -935,6 +937,127 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
     }));
   };
 
+  const handleDragStartCatalog = (e, typeKey) => {
+    try {
+      e.dataTransfer.setData('application/json', JSON.stringify({
+        source: 'catalog',
+        typeKey
+      }));
+      e.dataTransfer.effectAllowed = 'copy';
+      setDraggingAction({ source: 'catalog', typeKey });
+    } catch (err) {
+      console.error('Drag start error:', err);
+    }
+  };
+
+  const handleDragStartExisting = (e, actionId, parentId = null, listKey = null, index = 0) => {
+    try {
+      e.dataTransfer.setData('application/json', JSON.stringify({
+        source: 'existing',
+        actionId,
+        parentId,
+        listKey,
+        index
+      }));
+      e.dataTransfer.effectAllowed = 'move';
+      setDraggingAction({ source: 'existing', actionId, parentId, listKey, index });
+    } catch (err) {
+      console.error('Drag start existing error:', err);
+    }
+  };
+
+  const handleDragEnd = () => {
+    setActiveDropTarget(null);
+    setDraggingAction(null);
+  };
+
+  const handleDropOnMain = (e) => {
+    e.preventDefault();
+    setActiveDropTarget(null);
+    setDraggingAction(null);
+    try {
+      const rawData = e.dataTransfer.getData('application/json');
+      if (!rawData) return;
+      const data = JSON.parse(rawData);
+
+      if (data.source === 'catalog') {
+        addAction(data.typeKey);
+      } else if (data.source === 'existing' && data.parentId && data.listKey) {
+        // Move from nested slot to main actions list
+        const parent = actions.find(a => a.id === data.parentId);
+        if (!parent) return;
+        const subList = Array.isArray(parent[data.listKey]) ? parent[data.listKey] : [];
+        const itemToMove = subList.find(s => s.id === data.actionId);
+        if (!itemToMove) return;
+
+        deleteNestedAction(data.parentId, data.listKey, data.actionId);
+        setActions(prev => [...prev, { ...itemToMove, id: `act_${Date.now()}_${Math.random().toString(36).substr(2, 5)}` }]);
+      }
+    } catch (err) {
+      console.error('Drop on main error:', err);
+    }
+  };
+
+  const handleDropOnSlot = (e, parentId, listKey) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setActiveDropTarget(null);
+    setDraggingAction(null);
+
+    try {
+      const rawData = e.dataTransfer.getData('application/json');
+      if (!rawData) return;
+      const data = JSON.parse(rawData);
+
+      if (data.source === 'catalog') {
+        const def = ACTION_TYPES[data.typeKey];
+        if (!def || def.isBlock) return; // Prevent nesting blocks inside blocks
+        addNestedAction(parentId, listKey, data.typeKey);
+      } else if (data.source === 'existing') {
+        if (data.parentId === parentId && data.listKey === listKey) {
+          return;
+        }
+        if (data.parentId && data.listKey) {
+          const oldParent = actions.find(a => a.id === data.parentId);
+          if (!oldParent) return;
+          const oldList = Array.isArray(oldParent[data.listKey]) ? oldParent[data.listKey] : [];
+          const itemToMove = oldList.find(s => s.id === data.actionId);
+          if (!itemToMove) return;
+
+          deleteNestedAction(data.parentId, data.listKey, data.actionId);
+          setActions(prev => prev.map(a => {
+            if (a.id === parentId) {
+              const currentList = Array.isArray(a[listKey]) ? a[listKey] : [];
+              return {
+                ...a,
+                [listKey]: [...currentList, { ...itemToMove, id: `sub_${Date.now()}_${Math.random().toString(36).substr(2, 5)}` }]
+              };
+            }
+            return a;
+          }));
+        } else {
+          const itemToMove = actions.find(a => a.id === data.actionId);
+          if (!itemToMove) return;
+          const def = ACTION_TYPES[itemToMove.definitionId];
+          if (def?.isBlock) return;
+
+          setActions(prev => prev.filter(a => a.id !== data.actionId).map(a => {
+            if (a.id === parentId) {
+              const currentList = Array.isArray(a[listKey]) ? a[listKey] : [];
+              return {
+                ...a,
+                [listKey]: [...currentList, { ...itemToMove, id: `sub_${Date.now()}_${Math.random().toString(36).substr(2, 5)}` }]
+              };
+            }
+            return a;
+          }));
+        }
+      }
+    } catch (err) {
+      console.error('Slot drop error:', err);
+    }
+  };
+
   const getGroupedActions = () => {
     const groups = {};
     Object.entries(ACTION_TYPES).forEach(([key, action]) => {
@@ -1235,34 +1358,46 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
     );
   };
 
-  const renderNestedSlot = (parentAct, listKey, title, borderColor, badgeColor, emptyText, addPlaceholder) => {
+  const renderNestedSlot = (parentAct, listKey, title, theme) => {
     const subList = Array.isArray(parentAct[listKey]) ? parentAct[listKey] : [];
+    const targetKey = `${parentAct.id}_${listKey}`;
+    const isHovered = activeDropTarget === targetKey;
+
     return (
-      <div className={`mt-3 pl-3 py-2 pr-2 border-l-4 ${borderColor} bg-black/30 rounded-r-lg space-y-2`}>
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-bold text-zinc-300 flex items-center gap-2">
-            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${badgeColor}`}>
-              {listKey === 'thenActions' ? 'THEN' : listKey === 'elseActions' ? 'ELSE' : 'LOOP'}
+      <div className={`mt-3 pl-3 py-1 pr-1 border-l-2 ${theme.borderColor} bg-black/20 rounded-r-2xl transition-all duration-200`}>
+        {/* Slot Header */}
+        <div className="flex items-center justify-between py-1.5 px-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase ${theme.badgeBg} ${theme.badgeText}`}>
+              {listKey === 'thenActions' ? t('action_types.IF_CONDITION.is_met', language) : listKey === 'elseActions' ? t('action_types.IF_CONDITION.is_not_met', language) : t('action_types.LOOP_REPEAT.loop_keyword', language)}
             </span>
-            {title}
-          </span>
-          <span className="text-[10px] text-zinc-500 font-medium">
+            <span className="text-xs font-semibold text-zinc-300 truncate">
+              {title}
+            </span>
+          </div>
+          <span className="text-[10px] text-zinc-500 font-mono shrink-0 ml-2">
             {subList.length} {language === 'tr' ? 'eylem' : 'actions'}
           </span>
         </div>
 
-        {subList.length === 0 ? (
-          <div className="text-[11px] text-zinc-500 italic py-2 px-3 bg-white/5 rounded border border-white/5">
-            {emptyText}
-          </div>
-        ) : (
-          <div className="space-y-2">
+        {/* Sub-actions List */}
+        {subList.length > 0 && (
+          <div className="space-y-2 py-1">
             {subList.map((subAct, subIdx) => {
               const subDef = ACTION_TYPES[subAct.definitionId] || ACTION_TYPES[subAct.type];
               return (
-                <div key={subAct.id} className="bg-[#141416] border border-white/10 rounded-lg p-2.5 text-xs space-y-2 shadow-sm">
+                <div
+                  key={subAct.id}
+                  draggable={true}
+                  onDragStart={(e) => handleDragStartExisting(e, subAct.id, parentAct.id, listKey, subIdx)}
+                  onDragEnd={handleDragEnd}
+                  className="bg-[#18181c] border border-white/10 hover:border-white/20 rounded-xl p-2.5 text-xs space-y-2 shadow-md transition-all group/sub"
+                >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-zinc-600 hover:text-zinc-400 cursor-grab active:cursor-grabbing font-mono text-sm leading-none" title="Sürükle">
+                        ⠿
+                      </span>
                       {subDef?.fields?.length > 0 && (
                         <button
                           type="button"
@@ -1276,10 +1411,12 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                       <span className="w-4 h-4 rounded bg-zinc-800 text-[10px] flex items-center justify-center text-zinc-400 font-mono shrink-0">
                         {subIdx + 1}
                       </span>
-                      <span className="font-semibold text-zinc-200 truncate">
+                      <span className="font-medium text-zinc-200 truncate flex items-center gap-1.5">
+                        {subDef?.icon && <span className="w-3.5 h-3.5 text-zinc-400 shrink-0">{subDef.icon}</span>}
                         {subDef?.isPlugin ? subAct.label : (subDef ? t(subDef.label, language) : (subAct.label || subAct.type))}
                       </span>
                     </div>
+
                     <div className="flex items-center gap-1 shrink-0">
                       <button
                         type="button"
@@ -1325,34 +1462,66 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
           </div>
         )}
 
-        {/* Quick Add Sub Action Dropdown */}
-        <div className="relative pt-1">
-          <select
-            value=""
-            onChange={(e) => {
-              if (e.target.value) {
-                addNestedAction(parentAct.id, listKey, e.target.value);
-              }
-            }}
-            className="w-full bg-[#121212] border border-white/10 hover:border-white/20 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 focus:border-blue-500 outline-none transition-colors cursor-pointer appearance-none"
-          >
-            <option value="" disabled>+ {addPlaceholder}</option>
-            {Object.entries(getGroupedActions()).map(([cat, acts]) => {
-              const validActs = acts.filter(a => !a.isBlock);
-              if (validActs.length === 0) return null;
-              return (
-                <optgroup key={cat} label={validActs[0]?.isPlugin ? cat : t(cat, language)}>
-                  {validActs.map(a => (
-                    <option key={a.typeKey} value={a.typeKey}>
-                      {a.isPlugin ? a.label : t(a.label, language)}
-                    </option>
-                  ))}
-                </optgroup>
-              );
-            })}
-          </select>
-          <div className="absolute right-2.5 top-1/2 translate-y-[2px] pointer-events-none text-zinc-500">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg>
+        {/* Interactive Drag & Drop Target Zone */}
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            if (activeDropTarget !== targetKey) setActiveDropTarget(targetKey);
+          }}
+          onDragEnter={(e) => {
+            e.preventDefault();
+            setActiveDropTarget(targetKey);
+          }}
+          onDragLeave={(e) => {
+            if (e.currentTarget.contains(e.relatedTarget)) return;
+            if (activeDropTarget === targetKey) setActiveDropTarget(null);
+          }}
+          onDrop={(e) => handleDropOnSlot(e, parentAct.id, listKey)}
+          className={`relative my-1.5 p-3 rounded-xl border-2 border-dashed transition-all duration-200 flex flex-col items-center justify-center gap-1.5 cursor-pointer ${
+            isHovered
+              ? `${theme.bgActive} ${theme.borderHover} shadow-[0_0_20px_${theme.glowColor}] scale-[1.01]`
+              : 'border-white/10 hover:border-white/20 bg-white/[0.02] hover:bg-white/[0.04]'
+          }`}
+        >
+          <div className="flex items-center gap-2 text-xs font-medium pointer-events-none">
+            <svg className={`w-4 h-4 transition-transform ${isHovered ? 'scale-125 animate-bounce text-white' : 'text-zinc-500'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M8 21h8"/>
+            </svg>
+            <span className={isHovered ? 'text-white font-bold' : 'text-zinc-400'}>
+              {isHovered ? t('action_types.IF_CONDITION.drop_zone_hover', language) : (subList.length === 0 ? theme.emptyHint : t('action_types.IF_CONDITION.drag_hint', language))}
+            </span>
+          </div>
+
+          {/* Quick-Add Option */}
+          <div className="relative mt-0.5">
+            <select
+              value=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  addNestedAction(parentAct.id, listKey, e.target.value);
+                }
+              }}
+              className="bg-black/50 hover:bg-black/80 border border-white/10 rounded-lg px-2.5 py-1 text-[11px] text-zinc-400 hover:text-white outline-none transition-all cursor-pointer appearance-none pr-6"
+            >
+              <option value="" disabled>{t('action_types.IF_CONDITION.quick_add', language)}</option>
+              {Object.entries(getGroupedActions()).map(([cat, acts]) => {
+                const validActs = acts.filter(a => !a.isBlock);
+                if (validActs.length === 0) return null;
+                return (
+                  <optgroup key={cat} label={validActs[0]?.isPlugin ? cat : t(cat, language)}>
+                    {validActs.map(a => (
+                      <option key={a.typeKey} value={a.typeKey}>
+                        {a.isPlugin ? a.label : t(a.label, language)}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
+            </select>
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-500">
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg>
+            </div>
           </div>
         </div>
       </div>
@@ -1934,10 +2103,16 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                             {categoryActions.map((type) => (
                               <button
                                 key={type.typeKey}
+                                draggable={true}
+                                onDragStart={(e) => handleDragStartCatalog(e, type.typeKey)}
+                                onDragEnd={handleDragEnd}
                                 onClick={() => addAction(type.typeKey)}
-                                className="flex items-center justify-between p-2.5 bg-[#141416] border border-white/5 rounded-xl hover:border-blue-500/40 hover:bg-[#1a1a1f] hover:shadow-md transition-all text-left group/btn cursor-pointer"
+                                className="flex items-center justify-between p-2.5 bg-[#141416] border border-white/5 rounded-xl hover:border-blue-500/40 hover:bg-[#1a1a1f] hover:shadow-md transition-all text-left group/btn cursor-grab active:cursor-grabbing"
                               >
-                                <div className="flex items-center gap-3 min-w-0">
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <span className="text-zinc-600 group-hover/btn:text-zinc-400 font-mono text-xs leading-none shrink-0" title="Sürükle">
+                                    ⠿
+                                  </span>
                                   <div className="w-8 h-8 rounded-lg bg-zinc-800/70 flex items-center justify-center text-lg shrink-0 group-hover/btn:bg-blue-600/20 group-hover/btn:scale-105 transition-all">
                                     {type.icon}
                                   </div>
@@ -1979,12 +2154,53 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                   </div>
 
                   {actions.length === 0 ? (
-                    <div className="flex-1 flex flex-col items-center justify-center text-zinc-600 border-2 border-dashed border-white/5 rounded-lg">
-                      <span className="text-sm">{t('editor.actions.no_actions', language)}</span>
-                      <span className="text-xs mt-1">{t('editor.actions.select_hint', language)}</span>
+                    <div
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'copy';
+                        if (activeDropTarget !== 'main') setActiveDropTarget('main');
+                      }}
+                      onDragEnter={(e) => {
+                        e.preventDefault();
+                        setActiveDropTarget('main');
+                      }}
+                      onDragLeave={(e) => {
+                        if (e.currentTarget.contains(e.relatedTarget)) return;
+                        if (activeDropTarget === 'main') setActiveDropTarget(null);
+                      }}
+                      onDrop={handleDropOnMain}
+                      className={`flex-1 flex flex-col items-center justify-center text-zinc-600 border-2 border-dashed rounded-xl transition-all duration-200 cursor-pointer ${
+                        activeDropTarget === 'main'
+                          ? 'border-blue-400 bg-blue-500/10 text-blue-300 shadow-[0_0_20px_rgba(59,130,246,0.2)]'
+                          : 'border-white/10 hover:border-white/20'
+                      }`}
+                    >
+                      <svg className={`w-8 h-8 mb-2 transition-transform ${activeDropTarget === 'main' ? 'scale-125 animate-bounce text-blue-400' : 'text-zinc-600'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M8 21h8"/>
+                      </svg>
+                      <span className="text-sm font-medium">{activeDropTarget === 'main' ? t('action_types.IF_CONDITION.drop_zone_hover', language) : t('editor.actions.no_actions', language)}</span>
+                      <span className="text-xs mt-1 text-zinc-500">{t('action_types.IF_CONDITION.drag_hint', language)}</span>
                     </div>
                   ) : (
-                    <div className="space-y-3 overflow-y-auto pr-2 flex-1 min-h-0">
+                    <div
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'copy';
+                        if (activeDropTarget !== 'main') setActiveDropTarget('main');
+                      }}
+                      onDragEnter={(e) => {
+                        e.preventDefault();
+                        setActiveDropTarget('main');
+                      }}
+                      onDragLeave={(e) => {
+                        if (e.currentTarget.contains(e.relatedTarget)) return;
+                        if (activeDropTarget === 'main') setActiveDropTarget(null);
+                      }}
+                      onDrop={handleDropOnMain}
+                      className={`space-y-3 overflow-y-auto pr-2 flex-1 min-h-0 rounded-xl transition-all duration-200 ${
+                        activeDropTarget === 'main' ? 'ring-2 ring-blue-500/30 bg-blue-500/[0.02]' : ''
+                      }`}
+                    >
                       {actions.map((act, idx) => {
                         const actionDef = ACTION_TYPES[act.definitionId];
 
@@ -2017,17 +2233,29 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                         }
 
                         return (
-                          <div key={act.id} className={`flex flex-col p-3 bg-[#1e1e1e] border ${actionDef.isBlock ? 'border-amber-500/30 hover:border-amber-500/50' : 'border-white/10 hover:border-white/20'} rounded-lg group transition-all`}>
+                          <div
+                            key={act.id}
+                            draggable={true}
+                            onDragStart={(e) => handleDragStartExisting(e, act.id, null, null, idx)}
+                            onDragEnd={handleDragEnd}
+                            className={`flex flex-col p-3 bg-[#1e1e1e] border ${
+                              actionDef.isBlock
+                                ? (act.definitionId === 'IF_CONDITION' ? 'border-amber-500/30 hover:border-amber-500/60 bg-gradient-to-b from-[#1c1b18] to-[#18181a]' : 'border-blue-500/30 hover:border-blue-500/60 bg-gradient-to-b from-[#181a20] to-[#18181a]')
+                                : 'border-white/10 hover:border-white/20'
+                            } rounded-xl group transition-all shadow-md`}
+                          >
 
                             <div className="flex items-center justify-between mb-2">
-
                               <div className="flex items-center gap-2">
+                                <span className="text-zinc-600 group-hover:text-zinc-400 cursor-grab active:cursor-grabbing font-mono text-sm leading-none" title="Sürükle">
+                                  ⠿
+                                </span>
                                 {(actionDef.fields?.length > 0 || actionDef.isBlock) && (
                                   <button onClick={() => toggleActionExpand(act.id)} className="p-1 cursor-pointer float-left text-zinc-500 hover:text-white transition-colors" title={act.expanded ? 'Küçült' : 'Genişlet'}>
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-200 ${act.expanded ? 'rotate-180' : ''}`}><path d="m6 9 6 6 6-6" /></svg>
                                   </button>
                                 )}
-                                <span className={`w-5 h-5 rounded ${actionDef.isBlock ? 'bg-amber-500/20 text-amber-300' : 'bg-zinc-800 text-zinc-400'} text-xs flex items-center justify-center font-bold`}>{idx + 1}</span>
+                                <span className={`w-5 h-5 rounded ${actionDef.isBlock ? (act.definitionId === 'IF_CONDITION' ? 'bg-amber-500/20 text-amber-300' : 'bg-blue-500/20 text-blue-300') : 'bg-zinc-800 text-zinc-400'} text-xs flex items-center justify-center font-bold`}>{idx + 1}</span>
                                 <span className="text-sm font-bold text-white flex items-center gap-2">
                                   {actionDef.icon && <span className="w-4 h-4 flex items-center justify-center shrink-0">{actionDef.icon}</span>}
                                   {actionDef.isPlugin ? act.label : t(act.label, language)}
@@ -2050,50 +2278,164 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                   transition={{ duration: 0.2 }}
                                   className="overflow-hidden"
                                 >
-                                  <div className="pl-7 space-y-2">
-                                    {/* Action Fields */}
-                                    {actionDef.fields?.map((field, fIdx) => (
-                                      <div key={field.key || fIdx}>
-                                        {renderFieldInput(act, field, (k, v) => updateAction(act.id, k, v))}
-                                      </div>
-                                    ))}
+                                  <div className="pl-6 space-y-3">
+                                    {/* IF_CONDITION Modern Visual Builder */}
+                                    {actionDef.isBlock && act.definitionId === 'IF_CONDITION' ? (
+                                      <div className="space-y-3">
+                                        <div className="bg-[#151518] border border-white/10 rounded-xl p-3 flex flex-wrap items-center gap-2 text-xs shadow-inner">
+                                          <span className="px-2 py-1 rounded-md bg-amber-500/20 border border-amber-500/30 text-amber-400 font-bold tracking-wider">
+                                            {t('action_types.IF_CONDITION.if_keyword', language)}
+                                          </span>
 
-                                    {/* Nested Block Containers */}
-                                    {actionDef.isBlock && act.definitionId === 'IF_CONDITION' && (
-                                      <div className="space-y-3 pt-1">
-                                        {renderNestedSlot(
-                                          act,
-                                          'thenActions',
-                                          t('action_types.IF_CONDITION.then_title', language),
-                                          'border-emerald-500',
-                                          'bg-emerald-600/30 text-emerald-400',
-                                          t('action_types.IF_CONDITION.empty_then', language),
-                                          t('action_types.IF_CONDITION.add_then_action', language)
-                                        )}
-                                        {act.hasElse && renderNestedSlot(
-                                          act,
-                                          'elseActions',
-                                          t('action_types.IF_CONDITION.else_title', language),
-                                          'border-amber-500',
-                                          'bg-amber-600/30 text-amber-400',
-                                          t('action_types.IF_CONDITION.empty_else', language),
-                                          t('action_types.IF_CONDITION.add_else_action', language)
-                                        )}
-                                      </div>
-                                    )}
+                                          <div className="flex items-center bg-[#1c1c20] border border-white/10 rounded-lg px-2.5 py-1 focus-within:border-amber-500/50">
+                                            <span className="text-zinc-500 mr-1 text-[11px] font-mono">$</span>
+                                            <input
+                                              type="text"
+                                              value={act.leftOperand || ''}
+                                              onChange={(e) => updateAction(act.id, 'leftOperand', e.target.value)}
+                                              placeholder="vol / $sys.cpu"
+                                              className="bg-transparent text-white outline-none w-28 text-xs font-mono"
+                                            />
+                                          </div>
 
-                                    {actionDef.isBlock && act.definitionId === 'LOOP_REPEAT' && (
-                                      <div className="pt-1">
-                                        {renderNestedSlot(
-                                          act,
-                                          'loopActions',
-                                          t('action_types.LOOP_REPEAT.actions_title', language),
-                                          'border-blue-500',
-                                          'bg-blue-600/30 text-blue-400',
-                                          t('action_types.LOOP_REPEAT.empty_loop', language),
-                                          t('action_types.LOOP_REPEAT.add_loop_action', language)
-                                        )}
+                                          <div className="relative">
+                                            <select
+                                              value={act.operator || '=='}
+                                              onChange={(e) => updateAction(act.id, 'operator', e.target.value)}
+                                              className="bg-[#1c1c20] border border-white/10 hover:border-white/20 rounded-lg px-2.5 py-1 text-xs text-amber-300 font-bold outline-none cursor-pointer appearance-none pr-6"
+                                            >
+                                              {[
+                                                { value: '==', labelKey: 'action_types.operators.eq' },
+                                                { value: '!=', labelKey: 'action_types.operators.neq' },
+                                                { value: '>', labelKey: 'action_types.operators.gt' },
+                                                { value: '<', labelKey: 'action_types.operators.lt' },
+                                                { value: '>=', labelKey: 'action_types.operators.gte' },
+                                                { value: '<=', labelKey: 'action_types.operators.lte' },
+                                                { value: 'contains', labelKey: 'action_types.operators.contains' }
+                                              ].map(opt => (
+                                                <option key={opt.value} value={opt.value}>
+                                                  {t(opt.labelKey, language)}
+                                                </option>
+                                              ))}
+                                            </select>
+                                            <div className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-amber-400/60">
+                                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6"/></svg>
+                                            </div>
+                                          </div>
+
+                                          <div className="flex items-center bg-[#1c1c20] border border-white/10 rounded-lg px-2.5 py-1 focus-within:border-amber-500/50">
+                                            <input
+                                              type="text"
+                                              value={act.rightOperand || ''}
+                                              onChange={(e) => updateAction(act.id, 'rightOperand', e.target.value)}
+                                              placeholder="0, true, 100..."
+                                              className="bg-transparent text-white outline-none w-24 text-xs font-mono"
+                                            />
+                                          </div>
+
+                                          <button
+                                            type="button"
+                                            onClick={() => updateAction(act.id, 'hasElse', !act.hasElse)}
+                                            className={`ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium transition-all cursor-pointer ${
+                                              act.hasElse
+                                                ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 shadow-sm'
+                                                : 'bg-white/5 border-white/10 hover:border-white/20 text-zinc-400 hover:text-white'
+                                            }`}
+                                          >
+                                            <span className={`w-2 h-2 rounded-full ${act.hasElse ? 'bg-amber-400' : 'bg-zinc-600'}`} />
+                                            {t('action_types.IF_CONDITION.enable_else', language)}
+                                          </button>
+                                        </div>
+
+                                        {/* Nested Then / Else Slots */}
+                                        <div className="space-y-3 pt-1">
+                                          {renderNestedSlot(
+                                            act,
+                                            'thenActions',
+                                            t('action_types.IF_CONDITION.then_title', language),
+                                            {
+                                              borderColor: 'border-emerald-500/80',
+                                              bgActive: 'bg-emerald-500/20',
+                                              borderHover: 'border-emerald-400',
+                                              badgeBg: 'bg-emerald-500/20 border border-emerald-500/30',
+                                              badgeText: 'text-emerald-400',
+                                              glowColor: 'rgba(16,185,129,0.25)',
+                                              emptyHint: t('action_types.IF_CONDITION.empty_then', language)
+                                            }
+                                          )}
+                                          {act.hasElse && renderNestedSlot(
+                                            act,
+                                            'elseActions',
+                                            t('action_types.IF_CONDITION.else_title', language),
+                                            {
+                                              borderColor: 'border-amber-500/80',
+                                              bgActive: 'bg-amber-500/20',
+                                              borderHover: 'border-amber-400',
+                                              badgeBg: 'bg-amber-500/20 border border-amber-500/30',
+                                              badgeText: 'text-amber-400',
+                                              glowColor: 'rgba(245,158,11,0.25)',
+                                              emptyHint: t('action_types.IF_CONDITION.empty_else', language)
+                                            }
+                                          )}
+                                        </div>
                                       </div>
+                                    ) : actionDef.isBlock && act.definitionId === 'LOOP_REPEAT' ? (
+                                      <div className="space-y-3">
+                                        <div className="bg-[#151518] border border-white/10 rounded-xl p-3 flex flex-wrap items-center gap-2 text-xs shadow-inner">
+                                          <span className="px-2 py-1 rounded-md bg-blue-500/20 border border-blue-500/30 text-blue-400 font-bold tracking-wider">
+                                            {t('action_types.LOOP_REPEAT.loop_keyword', language)}
+                                          </span>
+
+                                          <div className="flex items-center bg-[#1c1c20] border border-white/10 rounded-lg px-2.5 py-1 focus-within:border-blue-500/50">
+                                            <span className="text-zinc-400 text-xs mr-2">{t('action_types.LOOP_REPEAT.count', language)}:</span>
+                                            <input
+                                              type="number"
+                                              min={1}
+                                              max={100}
+                                              value={act.count !== undefined ? act.count : 3}
+                                              onChange={(e) => updateAction(act.id, 'count', parseInt(e.target.value) || 1)}
+                                              className="bg-transparent text-white font-bold outline-none w-12 text-xs text-center"
+                                            />
+                                            <span className="text-zinc-500 text-xs ml-1">{t('action_types.LOOP_REPEAT.times', language)}</span>
+                                          </div>
+
+                                          <div className="flex items-center bg-[#1c1c20] border border-white/10 rounded-lg px-2.5 py-1 focus-within:border-blue-500/50">
+                                            <span className="text-zinc-400 text-xs mr-2">{t('action_types.LOOP_REPEAT.delay', language)}:</span>
+                                            <input
+                                              type="number"
+                                              min={0}
+                                              value={act.delay !== undefined ? act.delay : 100}
+                                              onChange={(e) => updateAction(act.id, 'delay', parseInt(e.target.value) || 0)}
+                                              className="bg-transparent text-white font-bold outline-none w-16 text-xs text-center"
+                                            />
+                                            <span className="text-zinc-500 text-xs ml-1">ms</span>
+                                          </div>
+                                        </div>
+
+                                        <div className="pt-1">
+                                          {renderNestedSlot(
+                                            act,
+                                            'loopActions',
+                                            t('action_types.LOOP_REPEAT.actions_title', language),
+                                            {
+                                              borderColor: 'border-blue-500/80',
+                                              bgActive: 'bg-blue-500/20',
+                                              borderHover: 'border-blue-400',
+                                              badgeBg: 'bg-blue-500/20 border border-blue-500/30',
+                                              badgeText: 'text-blue-400',
+                                              glowColor: 'rgba(59,130,246,0.25)',
+                                              emptyHint: t('action_types.LOOP_REPEAT.empty_loop', language)
+                                            }
+                                          )}
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      /* Standard Action Fields */
+                                      actionDef.fields?.map((field, fIdx) => (
+                                        <div key={field.key || fIdx}>
+                                          {renderFieldInput(act, field, (k, v) => updateAction(act.id, k, v))}
+                                        </div>
+                                      ))
                                     )}
                                   </div>
                                 </motion.div>
