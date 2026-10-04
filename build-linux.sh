@@ -52,9 +52,8 @@ echo -e "\n\033[1;36m[2/5] Checking Node.js and npm...\033[0m"
 if ! command -v npm &> /dev/null; then
     echo "⚠️ npm bulunamadı. Node.js ve npm otomatik kuruluyor..."
     if command -v apt-get &> /dev/null; then
-        # NodeSource LTS (v20) kurulumu
-        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-        sudo apt-get install -y nodejs
+        sudo apt-get update -y
+        sudo apt-get install -y nodejs npm
     elif command -v dnf &> /dev/null; then
         sudo dnf install -y nodejs npm
     elif command -v pacman &> /dev/null; then
