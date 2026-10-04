@@ -47,20 +47,29 @@ elif command -v pacman &> /dev/null; then
         systemd
 fi
 
-# 2. Node.js & npm Check and Auto-Install
+# 2. Node.js & npm Check and Auto-Install (Requires Node.js >= 20.9.0)
 echo -e "\n\033[1;36m[2/5] Checking Node.js and npm...\033[0m"
-if ! command -v npm &> /dev/null; then
-    echo "⚠️ npm not found. Installing Node.js and npm automatically..."
-    if command -v apt-get &> /dev/null; then
-        sudo apt-get update -y
-        sudo apt-get install -y nodejs npm
+export PATH="/usr/local/bin:$PATH"
+
+NODE_MAJOR=0
+if command -v node &> /dev/null; then
+    NODE_MAJOR=$(node -v 2>/dev/null | cut -d'.' -f1 | tr -d 'v' || echo "0")
+fi
+
+if ! command -v npm &> /dev/null || [ "$NODE_MAJOR" -lt 20 ]; then
+    echo "⚠️ Node.js >= 20.9.0 is required for Next.js (current: $(node -v 2>/dev/null || echo 'none')). Upgrading Node.js..."
+    if command -v npm &> /dev/null; then
+        sudo npm install -g n
+        sudo n 20
+        export PATH="/usr/local/bin:$PATH"
+        hash -r 2>/dev/null || true
+    elif command -v apt-get &> /dev/null; then
+        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+        sudo apt-get install -y nodejs
     elif command -v dnf &> /dev/null; then
         sudo dnf install -y nodejs npm
     elif command -v pacman &> /dev/null; then
         sudo pacman -S --needed --noconfirm nodejs npm
-    else
-        echo -e "\033[1;31m[ERROR] Package manager not recognized. Please install Node.js and npm manually.\033[0m"
-        exit 1
     fi
 fi
 echo "✓ Node.js version: $(node -v)"
