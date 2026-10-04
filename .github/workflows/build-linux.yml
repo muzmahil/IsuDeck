@@ -1,0 +1,77 @@
+name: Build Linux Release
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'isu-deck-ui/**'
+      - '.github/workflows/build-linux.yml'
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'isu-deck-ui/package-lock.json'
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            isu-deck-ui/src-tauri/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install Linux GUI & WebKit dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libasound2-dev \
+            libudev-dev
+
+      - name: Install Frontend Dependencies
+        working-directory: isu-deck-ui
+        run: npm ci
+
+      - name: Build Next.js Static Export
+        working-directory: isu-deck-ui
+        run: npm run build
+
+      - name: Build Tauri Linux Release Binary
+        working-directory: isu-deck-ui/src-tauri
+        run: cargo build --release
+
+      - name: Copy & Prepare Artifact
+        run: |
+          mkdir -p dist-linux
+          cp isu-deck-ui/src-tauri/target/release/app dist-linux/IsuDeck-Linux-x64
+          chmod +x dist-linux/IsuDeck-Linux-x64
+
+      - name: Upload Linux Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: IsuDeck-Linux-x64
+          path: dist-linux/IsuDeck-Linux-x64

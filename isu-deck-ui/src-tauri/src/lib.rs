@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod interception;
+mod platform;
 mod action_runner;
 mod plugin_manager;
 
@@ -12,59 +12,18 @@ use tauri::{
     command,
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, WindowEvent,
+    Manager, WindowEvent,
 };
 
-use interception::{find_interception_dll, InterceptionLib, KeyStroke, INTERCEPTION_FILTER_KEY_ALL};
 use action_runner::ActionRunner;
 use plugin_manager::PluginManager;
 
 // ==========================================================
-// GÖMÜLÜ PORTABLE DOSYALAR (TEK EXE İÇİN)
+// GÖMÜLÜ PORTABLE SESLER (CROSS-PLATFORM)
 // ==========================================================
-static EMBEDDED_INTERCEPTION_DLL: &[u8] = include_bytes!("../engine/interception.dll");
-static EMBEDDED_INSTALLER: &[u8] = include_bytes!("../drivers/install-interception.exe");
 static EMBEDDED_SOUND_CLICK: &[u8] = include_bytes!("../../public/sounds/click.wav");
 static EMBEDDED_SOUND_MECH: &[u8] = include_bytes!("../../public/sounds/mech.wav");
 static EMBEDDED_SOUND_BEEP: &[u8] = include_bytes!("../../public/sounds/beep.wav");
-
-const INSTALL_HELPER_CMD: &str = "@echo off\r\n\
-setlocal enabledelayedexpansion\r\n\
-set \"ACTION=%~1\"\r\n\
-if /i \"%ACTION%\"==\"/uninstall\" goto :uninstall\r\n\
-\"%~dp0install-interception.exe\" /install\r\n\
-if %ERRORLEVEL% equ 0 exit /b 0\r\n\
-if exist \"%SystemRoot%\\System32\\drivers\\keyboard.sys\" (\r\n\
-    reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Services\\keyboard\" /v DisplayName /t REG_SZ /d \"Keyboard Upper Filter Driver\" /f >nul 2>&1\r\n\
-    reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Services\\keyboard\" /v Type /t REG_DWORD /d 1 /f >nul 2>&1\r\n\
-    reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Services\\keyboard\" /v Start /t REG_DWORD /d 1 /f >nul 2>&1\r\n\
-    reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Services\\keyboard\" /v ErrorControl /t REG_DWORD /d 1 /f >nul 2>&1\r\n\
-    reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Services\\mouse\" /v DisplayName /t REG_SZ /d \"Mouse Upper Filter Driver\" /f >nul 2>&1\r\n\
-    reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Services\\mouse\" /v Type /t REG_DWORD /d 1 /f >nul 2>&1\r\n\
-    reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Services\\mouse\" /v Start /t REG_DWORD /d 1 /f >nul 2>&1\r\n\
-    reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Services\\mouse\" /v ErrorControl /t REG_DWORD /d 1 /f >nul 2>&1\r\n\
-    reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e96b-e325-11ce-bfc1-08002be10318}\" /v UpperFilters /t REG_MULTI_SZ /d \"keyboard\\0kbdclass\" /f >nul 2>&1\r\n\
-    reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e96f-e325-11ce-bfc1-08002be10318}\" /v UpperFilters /t REG_MULTI_SZ /d \"mouse\\0mouclass\" /f >nul 2>&1\r\n\
-    exit /b 0\r\n\
-)\r\n\
-exit /b 1\r\n\
-:uninstall\r\n\
-\"%~dp0install-interception.exe\" /uninstall\r\n\
-exit /b %ERRORLEVEL%\r\n";
-
-fn detect_system_language() -> &'static str {
-    #[cfg(windows)]
-    {
-        extern "system" {
-            fn GetUserDefaultUILanguage() -> u16;
-        }
-        let lang_id = unsafe { GetUserDefaultUILanguage() };
-        if (lang_id & 0xFF) == 0x1F {
-            return "tr";
-        }
-    }
-    "en"
-}
 
 // ==========================================================
 // 1. ENGINE STATE
@@ -72,7 +31,7 @@ fn detect_system_language() -> &'static str {
 
 pub struct EngineState {
     pub block_list: Arc<Mutex<HashSet<(String, u16)>>>,
-    pub blocked_keys_pressed: Mutex<HashSet<(i32, u16)>>,
+    pub blocked_keys_pressed: Arc<Mutex<HashSet<(i32, u16)>>>,
     pub plugin_manager: Arc<PluginManager>,
     pub minimize_to_tray: Mutex<bool>,
 }
@@ -116,25 +75,28 @@ fn bootstrap_portable_environment(app: &tauri::AppHandle) {
         }
     };
 
-    println!("📁 [BOOTSTRAP] IsuDeck Portable Dizin: {}", root.display());
+    println!("📁 [BOOTSTRAP] IsuDeck Dizin: {}", root.display());
 
-    // 1. interception.dll yoksa oluştur
-    let dll_path = root.join("interception.dll");
-    if !dll_path.exists() {
-        let _ = fs::write(&dll_path, EMBEDDED_INTERCEPTION_DLL);
-        println!("✨ [BOOTSTRAP] interception.dll çıkartıldı.");
-    }
+    #[cfg(windows)]
+    {
+        // 1. Windows: interception.dll yoksa oluştur
+        let dll_path = root.join("interception.dll");
+        if !dll_path.exists() {
+            let _ = fs::write(&dll_path, platform::windows::bootstrap::EMBEDDED_INTERCEPTION_DLL);
+            println!("✨ [BOOTSTRAP] interception.dll çıkartıldı.");
+        }
 
-    // 2. drivers/install-interception.exe ve install_helper.cmd yoksa oluştur
-    let drivers_dir = root.join("drivers");
-    let _ = fs::create_dir_all(&drivers_dir);
-    let installer_path = drivers_dir.join("install-interception.exe");
-    if !installer_path.exists() {
-        let _ = fs::write(&installer_path, EMBEDDED_INSTALLER);
-        println!("✨ [BOOTSTRAP] drivers/install-interception.exe çıkartıldı.");
+        // 2. Windows: drivers/install-interception.exe ve install_helper.cmd yoksa oluştur
+        let drivers_dir = root.join("drivers");
+        let _ = fs::create_dir_all(&drivers_dir);
+        let installer_path = drivers_dir.join("install-interception.exe");
+        if !installer_path.exists() {
+            let _ = fs::write(&installer_path, platform::windows::bootstrap::EMBEDDED_INSTALLER);
+            println!("✨ [BOOTSTRAP] drivers/install-interception.exe çıkartıldı.");
+        }
+        let helper_path = drivers_dir.join("install_helper.cmd");
+        let _ = fs::write(&helper_path, platform::windows::bootstrap::INSTALL_HELPER_CMD);
     }
-    let helper_path = drivers_dir.join("install_helper.cmd");
-    let _ = fs::write(&helper_path, INSTALL_HELPER_CMD);
 
     // 3. sounds/ klasörü ve varsayılan sesleri oluştur
     let sounds_dir = root.join("sounds");
@@ -175,7 +137,7 @@ fn bootstrap_portable_environment(app: &tauri::AppHandle) {
     // 6. settings.json yoksa varsayılan ayarları oluştur (Sistem diline göre)
     let settings_path = root.join("settings.json");
     if !settings_path.exists() {
-        let default_lang = detect_system_language();
+        let default_lang = platform::os::detect_system_language();
         let default_settings = serde_json::json!({
             "minimizeToTray": false,
             "autoStart": false,
@@ -240,27 +202,33 @@ fn fs_read_dir(app: tauri::AppHandle, path: String) -> Result<Vec<String>, Strin
     Ok(out)
 }
 
-// Ses Klasörünü Windows Explorer'da Aç
 #[command]
 fn open_sounds_dir(app: tauri::AppHandle) -> Result<(), String> {
     let root = isudeck_root(&app)?;
     let sounds_dir = root.join("sounds");
     fs::create_dir_all(&sounds_dir).map_err(|e| e.to_string())?;
     
-    std::process::Command::new("explorer")
-        .arg(sounds_dir.display().to_string())
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer")
+            .arg(sounds_dir.display().to_string())
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(sounds_dir.display().to_string())
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
-// Ses Dosyalarını Listele
 #[command]
 fn list_custom_sounds(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     let root = isudeck_root(&app)?;
     let sounds_dir = root.join("sounds");
-    fs::create_dir_all(&sounds_dir).map_err(|e| e.to_string())?;
-
     let mut sounds = vec![
         "click.wav".to_string(),
         "mech.wav".to_string(),
@@ -286,7 +254,6 @@ fn list_custom_sounds(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     Ok(sounds)
 }
 
-// Ses Çal (Yerel winmm ile gecikmesiz çalma)
 #[command]
 fn play_sound_file(app: tauri::AppHandle, sound: String) {
     if let Ok(root) = isudeck_root(&app) {
@@ -308,188 +275,66 @@ fn play_sound_file(app: tauri::AppHandle, sound: String) {
 // 3. SÜRÜCÜ YÖNETİMİ
 // ==========================================================
 
-fn find_driver_installer(app: &tauri::AppHandle, action: &str) -> Option<(PathBuf, String)> {
-    let flag = if action == "install" { "/install" } else { "/uninstall" };
-    if let Ok(root) = isudeck_root(app) {
-        let helper = root.join("drivers").join("install_helper.cmd");
-        if helper.exists() {
-            return Some((PathBuf::from("cmd.exe"), format!("/c \"{}\" {}", helper.display(), flag)));
-        }
-        let p1 = root.join("drivers").join("install-interception.exe");
-        if p1.exists() { return Some((p1, flag.to_string())); }
-        let p2 = root.join("install-interception.exe");
-        if p2.exists() { return Some((p2, flag.to_string())); }
-    }
-    None
-}
-
-fn check_registry_has_interception() -> bool {
+#[command]
+async fn manage_driver(app: tauri::AppHandle, action: String) -> Result<String, String> {
     #[cfg(windows)]
     {
-        use std::os::windows::ffi::OsStrExt;
-        use windows_sys::Win32::System::Registry::{
-            RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ,
-        };
+        let root = isudeck_root(&app)?;
+        let (installer, args) = platform::windows::bootstrap::find_driver_installer(&root, &action)
+            .ok_or("drivers/install-interception.exe bulunamadı.")?;
 
-        let subkey: Vec<u16> = std::ffi::OsStr::new("SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e96b-e325-11ce-bfc1-08002be10318}")
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
+        let success = tauri::async_runtime::spawn_blocking(move || {
+            platform::windows::bootstrap::run_silent_elevated(&installer, &args)
+        })
+        .await
+        .map_err(|e| e.to_string())??;
 
-        let val_name: Vec<u16> = std::ffi::OsStr::new("UpperFilters")
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-
-        let mut hkey: HKEY = std::ptr::null_mut();
-        let res = unsafe {
-            RegOpenKeyExW(
-                HKEY_LOCAL_MACHINE,
-                subkey.as_ptr(),
-                0,
-                KEY_READ,
-                &mut hkey,
-            )
-        };
-
-        if res != 0 || hkey.is_null() {
-            return false;
-        }
-
-        let mut buf: Vec<u16> = vec![0; 1024];
-        let mut buf_size = (buf.len() * 2) as u32;
-        let mut val_type = 0;
-
-        let q_res = unsafe {
-            RegQueryValueExW(
-                hkey,
-                val_name.as_ptr(),
-                std::ptr::null_mut(),
-                &mut val_type,
-                buf.as_mut_ptr() as *mut u8,
-                &mut buf_size,
-            )
-        };
-
-        unsafe { RegCloseKey(hkey) };
-
-        if q_res == 0 {
-            let str_val = String::from_utf16_lossy(&buf);
-            return str_val.to_lowercase().contains("keyboard");
-        }
-    }
-    false
-}
-
-fn run_silent_elevated(exe_path: &std::path::Path, args: &str) -> Result<bool, String> {
-    #[cfg(windows)]
-    {
-        use std::os::windows::ffi::OsStrExt;
-        use windows_sys::Win32::Foundation::FALSE;
-        use windows_sys::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject, INFINITE};
-        use windows_sys::Win32::UI::Shell::{
-            ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
-        };
-        use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
-
-        let verb: Vec<u16> = std::ffi::OsStr::new("runas")
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-
-        let file: Vec<u16> = exe_path
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-
-        let params: Vec<u16> = std::ffi::OsStr::new(args)
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-
-        let mut exec_info = SHELLEXECUTEINFOW {
-            cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
-            fMask: SEE_MASK_NOCLOSEPROCESS,
-            hwnd: std::ptr::null_mut(),
-            lpVerb: verb.as_ptr(),
-            lpFile: file.as_ptr(),
-            lpParameters: params.as_ptr(),
-            lpDirectory: std::ptr::null(),
-            nShow: SW_HIDE,
-            hInstApp: std::ptr::null_mut(),
-            lpIDList: std::ptr::null_mut(),
-            lpClass: std::ptr::null(),
-            hkeyClass: std::ptr::null_mut(),
-            dwHotKey: 0,
-            Anonymous: unsafe { std::mem::zeroed() },
-            hProcess: std::ptr::null_mut(),
-        };
-
-        let ok = unsafe { ShellExecuteExW(&mut exec_info) };
-        if ok == FALSE || exec_info.hProcess.is_null() {
-            return Err("Kullanıcı yönetici onayını (UAC) iptal etti veya işlem başlatılamadı.".to_string());
-        }
-
-        let h_proc = exec_info.hProcess;
-        unsafe {
-            WaitForSingleObject(h_proc, INFINITE);
-            let mut exit_code: u32 = 0;
-            GetExitCodeProcess(h_proc, &mut exit_code);
-            windows_sys::Win32::Foundation::CloseHandle(h_proc);
-            Ok(exit_code == 0)
+        if success {
+            Ok(action)
+        } else {
+            Err("Sürücü işlemi tamamlanamadı veya yönetici izni reddedildi.".to_string())
         }
     }
     #[cfg(not(windows))]
     {
-        Err("Yalnızca Windows işletim sisteminde desteklenmektedir.".to_string())
-    }
-}
-
-#[command]
-async fn manage_driver(app: tauri::AppHandle, action: String) -> Result<String, String> {
-    let (installer, args) = find_driver_installer(&app, &action).ok_or("drivers/install-interception.exe bulunamadı.")?;
-
-    let success = tauri::async_runtime::spawn_blocking(move || {
-        run_silent_elevated(&installer, &args)
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-
-    if success {
-        Ok(action)
-    } else {
-        Err("Sürücü işlemi tamamlanamadı veya yönetici izni reddedildi.".to_string())
+        Ok("Linux yerleşik mod aktif, ek sürücü gerekmez.".to_string())
     }
 }
 
 #[command]
 fn check_driver_status(app: tauri::AppHandle) -> String {
-    let reg_has = check_registry_has_interception();
-    let mem_has = if let Some(dll_path) = find_interception_dll(&app) {
-        if let Ok(lib) = InterceptionLib::load(&dll_path) {
-            let ctx = (lib.create_context)();
-            if !ctx.is_null() {
-                (lib.destroy_context)(ctx);
-                true
+    #[cfg(windows)]
+    {
+        let reg_has = platform::windows::bootstrap::check_registry_has_interception();
+        let mem_has = if let Some(dll_path) = platform::windows::interception::find_interception_dll(&app) {
+            if let Ok(lib) = platform::windows::interception::InterceptionLib::load(&dll_path) {
+                let ctx = (lib.create_context)();
+                if !ctx.is_null() {
+                    (lib.destroy_context)(ctx);
+                    true
+                } else {
+                    false
+                }
             } else {
                 false
             }
         } else {
             false
-        }
-    } else {
-        false
-    };
+        };
 
-    if reg_has && mem_has {
+        if reg_has && mem_has {
+            "active".to_string()
+        } else if reg_has && !mem_has {
+            "reboot_required_install".to_string()
+        } else if !reg_has && mem_has {
+            "reboot_required_uninstall".to_string()
+        } else {
+            "uninstalled".to_string()
+        }
+    }
+    #[cfg(not(windows))]
+    {
         "active".to_string()
-    } else if reg_has && !mem_has {
-        "reboot_required_install".to_string()
-    } else if !reg_has && mem_has {
-        "reboot_required_uninstall".to_string()
-    } else {
-        "uninstalled".to_string()
     }
 }
 
@@ -501,9 +346,18 @@ fn check_driver_installed(app: tauri::AppHandle) -> bool {
 
 #[command]
 fn restart_system() -> Result<(), String> {
-    let _ = std::process::Command::new("shutdown")
-        .args(["/r", "/t", "2", "/c", "IsuDeck surucu degisikligi icin bilgisayar yeniden baslatiliyor."])
-        .spawn();
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("shutdown")
+            .args(["/r", "/t", "2", "/c", "IsuDeck surucu degisikligi icin bilgisayar yeniden baslatiliyor."])
+            .spawn();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::process::Command::new("systemctl")
+            .arg("reboot")
+            .spawn();
+    }
     Ok(())
 }
 
@@ -519,132 +373,107 @@ async fn send_action(
 ) -> Result<(), String> {
     let parsed: serde_json::Value = match serde_json::from_str(&action_data) {
         Ok(v) => v,
-        Err(_) => return Ok(()),
+        Err(e) => {
+            eprintln!("[RUST ENGINE] send_action JSON ayrıştırma hatası: {}", e);
+            return Err(e.to_string());
+        }
     };
 
-    let msg_type = parsed.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    let action_type = parsed.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
-    match msg_type {
-        "ping" => {
-            let _ = app.emit("INPUT_EVENT", serde_json::json!({ "type": "pong" }).to_string());
-        }
-        "init_block_list" => {
-            if let Some(blocks) = parsed.get("blocks").and_then(|v| v.as_array()) {
+    match action_type {
+        "UPDATE_BLOCK_LIST" => {
+            if let Some(list) = parsed.get("list").and_then(|v| v.as_array()) {
                 let mut new_set = HashSet::new();
-                for b in blocks {
-                    let hid = b.get("hid").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let key = b.get("key").and_then(|v| {
-                        v.as_u64().map(|n| n as u16)
-                            .or_else(|| v.as_str().and_then(|s| s.parse::<u16>().ok()))
-                    });
-                    if key.is_some() {
-                        new_set.insert((hid, key.unwrap()));
+                for item in list {
+                    if let (Some(hid), Some(key)) = (
+                        item.get("hid").and_then(|v| v.as_str()),
+                        item.get("key").and_then(|v| v.as_u64()),
+                    ) {
+                        new_set.insert((hid.to_string(), key as u16));
                     }
                 }
-                println!("[RUST ENGINE] Blok listesi güncellendi: {} tuş", new_set.len());
                 let mut lock = state.block_list.lock().unwrap();
                 *lock = new_set;
             }
         }
-        "SET_MINIMIZE_TO_TRAY" => {
-            if let Some(val) = parsed.get("value").and_then(|v| v.as_bool()) {
-                let mut lock = state.minimize_to_tray.lock().unwrap();
-                *lock = val;
-                println!("[RUST ENGINE] Minimize to tray güncellendi: {}", val);
-            }
-        }
-        "SET_SYSTEM_VOLUME" => {
-            let percent = parsed.get("percent")
-                .and_then(|v| v.as_f64().or_else(|| v.as_str()?.parse().ok()))
-                .unwrap_or(50.0);
-            ActionRunner::set_system_master_volume(percent);
-        }
         "EXECUTE_ACTION" => {
-            if let Some(action_data_obj) = parsed.get("actionData") {
-                if let Some(actions) = action_data_obj.get("actions").and_then(|v| v.as_array()) {
-                    for act in actions {
-                        let raw_type = act.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                        let def_id = act.get("definitionId").and_then(|v| v.as_str()).unwrap_or("");
+            if let Some(act) = parsed.get("action") {
+                let raw_type = act.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                let def_id = act.get("definitionId").and_then(|v| v.as_str()).unwrap_or("");
 
-                        if matches!(raw_type, "SET_VARIABLE" | "CHANGE_VARIABLE" | "IF_CONDITION" | "LOOP_REPEAT")
-                            || matches!(def_id, "SET_VARIABLE" | "CHANGE_VARIABLE" | "IF_CONDITION" | "LOOP_REPEAT") {
-                            continue;
-                        }
+                let is_core = matches!(
+                    raw_type,
+                    "OPEN_APP"
+                        | "OPEN_URL"
+                        | "HOTKEY"
+                        | "MEDIA_BUTTON"
+                        | "PLAY_SOUND"
+                        | "DELAY"
+                        | "SET_SYSTEM_VOLUME"
+                        | "ADJUST_SYSTEM_VOLUME"
+                        | "SET_SYSTEM_MUTE"
+                        | "BRIGHTNESS_UP"
+                        | "BRIGHTNESS_DOWN"
+                        | "EMPTY_RECYCLE_BIN"
+                        | "SYSTEM_SLEEP"
+                        | "SCREENSHOT"
+                        | "CLIPBOARD_HISTORY"
+                        | "SHOW_DESKTOP"
+                        | "TASK_MANAGER"
+                        | "CLOSE_WINDOW"
+                        | "LOCK_SCREEN"
+                        | "TYPE_TEXT"
+                        | "RUN_COMMAND"
+                        | "OPEN_FOLDER"
+                        | "VIRTUAL_DESKTOP_LEFT"
+                        | "VIRTUAL_DESKTOP_RIGHT"
+                ) || matches!(
+                    def_id,
+                    "OPEN_APP"
+                        | "OPEN_URL"
+                        | "HOTKEY"
+                        | "MEDIA_BUTTON"
+                        | "PLAY_SOUND"
+                        | "DELAY"
+                        | "SET_SYSTEM_VOLUME"
+                        | "ADJUST_SYSTEM_VOLUME"
+                        | "SET_SYSTEM_MUTE"
+                        | "VOLUME_UP"
+                        | "VOLUME_DOWN"
+                        | "MUTE"
+                        | "MEDIA_PLAY"
+                        | "MEDIA_STOP"
+                        | "MEDIA_NEXT"
+                        | "MEDIA_PREVIOUS"
+                        | "BRIGHTNESS_UP"
+                        | "BRIGHTNESS_DOWN"
+                        | "EMPTY_RECYCLE_BIN"
+                        | "SYSTEM_SLEEP"
+                        | "SCREENSHOT"
+                        | "CLIPBOARD_HISTORY"
+                        | "SHOW_DESKTOP"
+                        | "TASK_MANAGER"
+                        | "CLOSE_WINDOW"
+                        | "LOCK_SCREEN"
+                        | "TYPE_TEXT"
+                        | "RUN_COMMAND"
+                        | "OPEN_FOLDER"
+                        | "VIRTUAL_DESKTOP_LEFT"
+                        | "VIRTUAL_DESKTOP_RIGHT"
+                );
 
-                        let is_core = matches!(
-                            raw_type,
-                            "OPEN_APP"
-                                | "OPEN_URL"
-                                | "HOTKEY"
-                                | "MEDIA_BUTTON"
-                                | "PLAY_SOUND"
-                                | "DELAY"
-                                | "SET_SYSTEM_VOLUME"
-                                | "ADJUST_SYSTEM_VOLUME"
-                                | "SET_SYSTEM_MUTE"
-                                | "BRIGHTNESS_UP"
-                                | "BRIGHTNESS_DOWN"
-                                | "EMPTY_RECYCLE_BIN"
-                                | "SYSTEM_SLEEP"
-                                | "SCREENSHOT"
-                                | "CLIPBOARD_HISTORY"
-                                | "SHOW_DESKTOP"
-                                | "TASK_MANAGER"
-                                | "CLOSE_WINDOW"
-                                | "LOCK_SCREEN"
-                                | "TYPE_TEXT"
-                                | "RUN_COMMAND"
-                                | "OPEN_FOLDER"
-                                | "VIRTUAL_DESKTOP_LEFT"
-                                | "VIRTUAL_DESKTOP_RIGHT"
-                        ) || matches!(
-                            def_id,
-                            "OPEN_APP"
-                                | "OPEN_URL"
-                                | "HOTKEY"
-                                | "MEDIA_BUTTON"
-                                | "PLAY_SOUND"
-                                | "DELAY"
-                                | "SET_SYSTEM_VOLUME"
-                                | "ADJUST_SYSTEM_VOLUME"
-                                | "SET_SYSTEM_MUTE"
-                                | "VOLUME_UP"
-                                | "VOLUME_DOWN"
-                                | "MUTE"
-                                | "MEDIA_PLAY"
-                                | "MEDIA_STOP"
-                                | "MEDIA_NEXT"
-                                | "MEDIA_PREVIOUS"
-                                | "BRIGHTNESS_UP"
-                                | "BRIGHTNESS_DOWN"
-                                | "EMPTY_RECYCLE_BIN"
-                                | "SYSTEM_SLEEP"
-                                | "SCREENSHOT"
-                                | "CLIPBOARD_HISTORY"
-                                | "SHOW_DESKTOP"
-                                | "TASK_MANAGER"
-                                | "CLOSE_WINDOW"
-                                | "LOCK_SCREEN"
-                                | "TYPE_TEXT"
-                                | "RUN_COMMAND"
-                                | "OPEN_FOLDER"
-                                | "VIRTUAL_DESKTOP_LEFT"
-                                | "VIRTUAL_DESKTOP_RIGHT"
-                        );
-
-                        if is_core {
-                            println!("[RUST ENGINE] Core Action çalıştırılıyor: '{}' / '{}'", raw_type, def_id);
-                            ActionRunner::run_action(act).await;
-                        } else {
-                            let lookup_key = if !raw_type.is_empty() && raw_type != "UNKNOWN" { raw_type } else { def_id };
-                            if let Some(res) = state.plugin_manager.handle_execute(lookup_key, act) {
-                                println!("[RUST ENGINE] Eklenti Aksiyon: {} - {}", res.success, res.message);
-                            } else if let Some(res) = state.plugin_manager.handle_execute(def_id, act) {
-                                println!("[RUST ENGINE] Eklenti Aksiyon (def_id): {} - {}", res.success, res.message);
-                            } else {
-                                println!("[RUST ENGINE] Eklenti Aksiyon işleyicisi bulunamadı: '{}' / '{}'", raw_type, def_id);
-                            }
-                        }
+                if is_core {
+                    println!("[RUST ENGINE] Core Action çalıştırılıyor: '{}' / '{}'", raw_type, def_id);
+                    ActionRunner::run_action(act).await;
+                } else {
+                    let lookup_key = if !raw_type.is_empty() && raw_type != "UNKNOWN" { raw_type } else { def_id };
+                    if let Some(res) = state.plugin_manager.handle_execute(lookup_key, act) {
+                        println!("[RUST ENGINE] Eklenti Aksiyon: {} - {}", res.success, res.message);
+                    } else if let Some(res) = state.plugin_manager.handle_execute(def_id, act) {
+                        println!("[RUST ENGINE] Eklenti Aksiyon (def_id): {} - {}", res.success, res.message);
+                    } else {
+                        println!("[RUST ENGINE] Eklenti Aksiyon işleyicisi bulunamadı: '{}' / '{}'", raw_type, def_id);
                     }
                 }
             }
@@ -670,122 +499,35 @@ async fn send_action(
                 state.plugin_manager.reload_all(&plugins_dir);
             }
         }
+        "SET_MINIMIZE_TO_TRAY" => {
+            if let Some(val) = parsed.get("value").and_then(|v| v.as_bool()) {
+                let mut lock = state.minimize_to_tray.lock().unwrap();
+                *lock = val;
+            }
+        }
         _ => {}
     }
 
     Ok(())
 }
 
-// ==========================================================
-// 5. INTERCEPTION ARKA PLAN DİNLEYİCİSİ (ULTRA DÜŞÜK GECİKME)
-// ==========================================================
-
-fn start_interception_thread(app_handle: tauri::AppHandle, state: Arc<EngineState>) {
-    let dll_path = match find_interception_dll(&app_handle) {
-        Some(p) => p,
-        None => {
-            eprintln!("[RUST ENGINE] interception.dll bulunamadı.");
-            return;
-        }
-    };
-
-    let lib = match InterceptionLib::load(&dll_path) {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("[RUST ENGINE] interception.dll yüklenemedi: {}", e);
-            return;
-        }
-    };
-
-    std::thread::spawn(move || {
-        #[cfg(windows)]
-        unsafe {
-            use windows_sys::Win32::System::Threading::{
-                GetCurrentProcess, GetCurrentThread, SetPriorityClass, SetThreadPriority,
-                HIGH_PRIORITY_CLASS, THREAD_PRIORITY_TIME_CRITICAL,
-            };
-
-            #[link(name = "winmm")]
-            extern "system" {
-                fn timeBeginPeriod(uPeriod: u32) -> u32;
-            }
-
-            let _ = timeBeginPeriod(1);
-            let _ = SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
-            let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
-        }
-
-        let context = (lib.create_context)();
-        if context.is_null() {
-            eprintln!("[RUST ENGINE] Interception context oluşturulamadı (Sürücü kurulu olmayabilir).");
-            return;
-        }
-
-        (lib.set_filter)(context, *lib.is_keyboard, INTERCEPTION_FILTER_KEY_ALL);
-        println!("🚀 [RUST ENGINE] Interception dinleyici thread devrede! (THREAD_PRIORITY_TIME_CRITICAL / 1ms Timer)");
-
-        let mut stroke = KeyStroke::default();
-
-        loop {
-            let device = (lib.wait)(context);
-            if device == 0 {
-                break;
-            }
-
-            let received = (lib.receive)(context, device, &mut stroke, 1);
-            if received <= 0 {
-                continue;
-            }
-
-            let is_down = (stroke.state & 1) == 0;
-            let hid = lib.get_device_hid(context, device);
-            let key_code = stroke.code;
-
-            let is_blocked = {
-                let lock = state.block_list.lock().unwrap();
-                lock.contains(&(hid.clone(), key_code))
-            };
-
-            if is_down {
-                if is_blocked {
-                    {
-                        let mut pressed = state.blocked_keys_pressed.lock().unwrap();
-                        pressed.insert((device, key_code));
-                    }
-
-                    let payload = serde_json::json!({
-                        "type": "inputPressed",
-                        "hid": hid,
-                        "handler": device,
-                        "key": key_code
-                    });
-                    let _ = app_handle.emit("INPUT_EVENT", &payload);
-                } else {
-                    // Engellenmeyen tuşları Windows'a gecikmesiz olarak hemen ilet
-                    (lib.send)(context, device, &stroke, 1);
-
-                    let payload = serde_json::json!({
-                        "type": "inputPressed",
-                        "hid": hid,
-                        "handler": device,
-                        "key": key_code
-                    });
-                    let _ = app_handle.emit("INPUT_EVENT", &payload);
-                }
-            } else {
-                let was_blocked = {
-                    let mut pressed = state.blocked_keys_pressed.lock().unwrap();
-                    pressed.remove(&(device, key_code))
-                };
-
-                if !was_blocked {
-                    (lib.send)(context, device, &stroke, 1);
-                }
-            }
-        }
-
-        (lib.destroy_context)(context);
-    });
+fn start_input_thread(app_handle: tauri::AppHandle, state: Arc<EngineState>) {
+    #[cfg(windows)]
+    {
+        platform::windows::interception::start_windows_interception_thread(
+            app_handle,
+            state.block_list.clone(),
+            state.blocked_keys_pressed.clone(),
+        );
+    }
+    #[cfg(target_os = "linux")]
+    {
+        platform::linux::evdev::start_linux_input_thread(
+            app_handle,
+            state.block_list.clone(),
+            state.blocked_keys_pressed.clone(),
+        );
+    }
 }
 
 #[command]
@@ -827,7 +569,7 @@ pub fn run() {
 
     let engine_state = Arc::new(EngineState {
         block_list: block_list_arc.clone(),
-        blocked_keys_pressed: Mutex::new(HashSet::new()),
+        blocked_keys_pressed: Arc::new(Mutex::new(HashSet::new())),
         plugin_manager: plugin_mgr,
         minimize_to_tray: Mutex::new(false),
     });
@@ -862,20 +604,20 @@ pub fn run() {
             let app_handle = app.handle().clone();
             state_clone.plugin_manager.set_app_handle(app_handle.clone());
 
-            // 1. Taşınabilir ortamı başlat (Tek exe için gerekli klasör ve dosyaları oluşturur)
+            // 1. Taşınabilir ortamı başlat
             bootstrap_portable_environment(&app_handle);
 
-            // 2. Dış eklentileri plugins/ dizininden dinamik olarak yükle ve süreçlerini başlat
+            // 2. Dış eklentileri plugins/ dizininden yükle
             if let Ok(root) = isudeck_root(&app_handle) {
                 let plugins_dir = root.join("plugins");
                 state_clone.plugin_manager.load_plugins_from_dir(&plugins_dir);
             }
 
-            // 3. Interception dinleyicisini başlat
-            start_interception_thread(app_handle, state_clone);
+            // 3. Platforma özgü giriş dinleyicisini başlat (Windows: Interception / Linux: evdev)
+            start_input_thread(app_handle, state_clone);
 
             // 4. Tray Menü
-            let sys_lang = detect_system_language();
+            let sys_lang = platform::os::detect_system_language();
             let (initial_show, initial_quit) = match sys_lang {
                 "en" => ("Show IsuDeck", "Quit"),
                 _ => ("IsuDeck'i Göster", "Çıkış Yap"),
@@ -923,20 +665,17 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                let should_minimize = {
-                    let state = window.state::<Arc<EngineState>>();
+                let state = window.state::<Arc<EngineState>>();
+                let minimize = {
                     let lock = state.minimize_to_tray.lock().unwrap();
                     *lock
                 };
-
-                if should_minimize {
+                if minimize {
                     api.prevent_close();
                     let _ = window.hide();
-                } else {
-                    window.app_handle().exit(0);
                 }
             }
         })
         .run(tauri::generate_context!())
-        .expect("Tauri başlatılırken hata oluştu");
+        .expect("error while running tauri application");
 }

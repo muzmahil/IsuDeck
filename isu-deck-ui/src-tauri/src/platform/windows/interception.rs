@@ -1,6 +1,8 @@
 use libloading::{Library, Symbol};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use tauri::Emitter;
 
 pub type InterceptionContext = *mut std::ffi::c_void;
 pub type InterceptionDevice = i32;
@@ -91,7 +93,6 @@ impl InterceptionLib {
             return "UNKNOWN_DEVICE".to_string();
         }
 
-        // C# engine ile uyumlu: Eğer içinde VID_ geçiyorsa standart formata dönüştür
         if let Some(vid_idx) = clean.find("VID_") {
             let slice = &clean[vid_idx..];
             if let Some(end_idx) = slice.find('#').or_else(|| slice.find('\\')) {
@@ -124,7 +125,7 @@ pub fn find_interception_dll(app: &tauri::AppHandle) -> Option<PathBuf> {
         }
     }
 
-    // 4. Çalışma dizini yolları
+    // 3. Çalışma dizini yolları
     let paths = [
         PathBuf::from("engine/interception.dll"),
         PathBuf::from("interception.dll"),
@@ -137,4 +138,100 @@ pub fn find_interception_dll(app: &tauri::AppHandle) -> Option<PathBuf> {
         }
     }
     None
+}
+
+pub fn start_windows_interception_thread(
+    app_handle: tauri::AppHandle,
+    block_list: Arc<Mutex<HashSet<(String, u16)>>>,
+    blocked_keys_pressed: Arc<Mutex<HashSet<(i32, u16)>>>,
+) {
+    let dll_path = match find_interception_dll(&app_handle) {
+        Some(p) => p,
+        None => {
+            eprintln!("[RUST ENGINE] interception.dll bulunamadı.");
+            return;
+        }
+    };
+
+    let lib = match InterceptionLib::load(&dll_path) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("[RUST ENGINE] interception.dll yüklenemedi: {}", e);
+            return;
+        }
+    };
+
+    std::thread::spawn(move || {
+        crate::platform::windows::bootstrap::enable_realtime_priority();
+
+        let context = (lib.create_context)();
+        if context.is_null() {
+            eprintln!("[RUST ENGINE] Interception context oluşturulamadı (Sürücü kurulu olmayabilir).");
+            return;
+        }
+
+        (lib.set_filter)(context, *lib.is_keyboard, INTERCEPTION_FILTER_KEY_ALL);
+        println!("🚀 [RUST ENGINE] Interception dinleyici thread devrede! (THREAD_PRIORITY_TIME_CRITICAL / 1ms Timer)");
+
+        let mut stroke = KeyStroke::default();
+
+        loop {
+            let device = (lib.wait)(context);
+            if device == 0 {
+                break;
+            }
+
+            let received = (lib.receive)(context, device, &mut stroke, 1);
+            if received <= 0 {
+                continue;
+            }
+
+            let is_down = (stroke.state & 1) == 0;
+            let hid = lib.get_device_hid(context, device);
+            let key_code = stroke.code;
+
+            let is_blocked = {
+                let lock = block_list.lock().unwrap();
+                lock.contains(&(hid.clone(), key_code))
+            };
+
+            if is_down {
+                if is_blocked {
+                    {
+                        let mut pressed = blocked_keys_pressed.lock().unwrap();
+                        pressed.insert((device, key_code));
+                    }
+
+                    let payload = serde_json::json!({
+                        "type": "inputPressed",
+                        "hid": hid,
+                        "handler": device,
+                        "key": key_code
+                    });
+                    let _ = app_handle.emit("INPUT_EVENT", &payload);
+                } else {
+                    (lib.send)(context, device, &stroke, 1);
+
+                    let payload = serde_json::json!({
+                        "type": "inputPressed",
+                        "hid": hid,
+                        "handler": device,
+                        "key": key_code
+                    });
+                    let _ = app_handle.emit("INPUT_EVENT", &payload);
+                }
+            } else {
+                let was_blocked = {
+                    let mut pressed = blocked_keys_pressed.lock().unwrap();
+                    pressed.remove(&(device, key_code))
+                };
+
+                if !was_blocked {
+                    (lib.send)(context, device, &stroke, 1);
+                }
+            }
+        }
+
+        (lib.destroy_context)(context);
+    });
 }

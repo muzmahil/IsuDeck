@@ -31,10 +31,16 @@ tauri-plugin-process = "2.0.0"
 # 1. Asenkron Motor
 tokio = { version = "1", features = ["full"] }
 
-# 2. Dinamik DLL Yükleyici (interception.dll ve eklentiler için)
-libloading = "0.8"
+# 4. OBS WebSocket İletişimi
+tokio-tungstenite = { version = "0.24", features = ["connect"] }
+tungstenite = "0.24"
+sha2 = "0.10"
+base64 = "0.22"
+futures-util = "0.3"
 
-# 3. Windows Native Giriş ve Klavye Simülasyonu
+# --- Windows Özel Bağımlılıklar ---
+[target.'cfg(windows)'.dependencies]
+libloading = "0.8"
 windows-sys = { version = "0.59", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
@@ -48,10 +54,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_Com"
 ] }
 
-# 4. OBS WebSocket İletişimi
-tokio-tungstenite = { version = "0.24", features = ["connect"] }
-tungstenite = "0.24"
-sha2 = "0.10"
-base64 = "0.22"
-futures-util = "0.3"
+# --- Linux Özel Bağımlılıklar ---
+[target.'cfg(target_os = "linux")'.dependencies]
+evdev = "0.12"
 
