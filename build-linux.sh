@@ -75,33 +75,30 @@ fi
 echo "✓ Node.js version: $(node -v)"
 echo "✓ npm version: $(npm -v)"
 
-# 3. Rust & Cargo Check and Auto-Install
+# 3. Rust & Cargo Check and Auto-Install (Requires modern Rust >= 1.80)
 echo -e "\n\033[1;36m[3/5] Checking Rust and Cargo...\033[0m"
+export PATH="$HOME/.cargo/bin:/root/.cargo/bin:$PATH"
 if [ -f "$HOME/.cargo/env" ]; then
     source "$HOME/.cargo/env"
+elif [ -f "/root/.cargo/env" ]; then
+    source "/root/.cargo/env"
 fi
 
-if ! command -v cargo &> /dev/null; then
-    echo "⚠️ Cargo not found. Installing Rust and Cargo..."
-    if command -v apt-get &> /dev/null; then
-        sudo apt-get update -y
-        sudo apt-get install -y cargo rustc || {
-            echo "Package manager fallback: trying rustup..."
-            curl -sSf https://sh.rustup.rs | sh -s -- -y || true
-        }
-    elif command -v dnf &> /dev/null; then
-        sudo dnf install -y cargo rust
-    elif command -v pacman &> /dev/null; then
-        sudo pacman -S --needed --noconfirm cargo rust
-    fi
-    if [ -f "$HOME/.cargo/env" ]; then
-        source "$HOME/.cargo/env"
-    fi
-fi
+CARGO_VER=$(cargo -v 2>/dev/null | awk '{print $2}' || echo "0.0.0")
+CARGO_MINOR=$(echo "$CARGO_VER" | cut -d'.' -f2 || echo "0")
 
-if ! command -v cargo &> /dev/null; then
-    echo -e "\033[1;31m[ERROR] Cargo could not be found. Please install Rust manually via: sudo apt install cargo\033[0m"
-    exit 1
+if ! command -v cargo &> /dev/null || [ "$CARGO_MINOR" -lt 80 ]; then
+    echo "⚠️ Upgrading Rust to modern stable (current: $CARGO_VER, requires >= 1.80)..."
+    if command -v rustup &> /dev/null; then
+        rustup default stable
+        rustup update stable
+    else
+        curl -4 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable || \
+        wget -qO- https://sh.rustup.rs | sh -s -- -y --default-toolchain stable || \
+        (sudo apt-get install -y rustup && rustup default stable)
+    fi
+    export PATH="$HOME/.cargo/bin:/root/.cargo/bin:$PATH"
+    [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
 fi
 echo "✓ Cargo version: $(cargo -v)"
 
