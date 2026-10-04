@@ -26,7 +26,13 @@ if command -v apt-get &> /dev/null; then
         file \
         libssl-dev \
         libasound2-dev \
-        libudev-dev
+        libudev-dev \
+        xdotool \
+        xdg-utils \
+        playerctl \
+        brightnessctl \
+        pulseaudio-utils \
+        trash-cli
 elif command -v dnf &> /dev/null; then
     sudo dnf install -y \
         webkit2gtk4.1-devel \
@@ -35,7 +41,13 @@ elif command -v dnf &> /dev/null; then
         librsvg2-devel \
         openssl-devel \
         alsa-lib-devel \
-        systemd-devel
+        systemd-devel \
+        xdotool \
+        xdg-utils \
+        playerctl \
+        brightnessctl \
+        pulseaudio-utils \
+        trash-cli
 elif command -v pacman &> /dev/null; then
     sudo pacman -S --needed --noconfirm \
         webkit2gtk-4.1 \
@@ -44,7 +56,13 @@ elif command -v pacman &> /dev/null; then
         librsvg \
         openssl \
         alsa-lib \
-        systemd
+        systemd \
+        xdotool \
+        xdg-utils \
+        playerctl \
+        brightnessctl \
+        libpulse \
+        trash-cli
 fi
 
 # 2. Node.js & npm Check and Auto-Install (Requires Node.js >= 20.9.0)
