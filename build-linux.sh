@@ -84,23 +84,22 @@ elif [ -f "/root/.cargo/env" ]; then
     source "/root/.cargo/env"
 fi
 
-CARGO_VER=$(cargo -v 2>/dev/null | awk '{print $2}' || echo "0.0.0")
+CARGO_VER=$(cargo --version 2>/dev/null | awk '{print $2}' || echo "0.0.0")
 CARGO_MINOR=$(echo "$CARGO_VER" | cut -d'.' -f2 || echo "0")
 
-if ! command -v cargo &> /dev/null || [ "$CARGO_MINOR" -lt 80 ]; then
+if ! command -v cargo &> /dev/null || ! [[ "$CARGO_MINOR" =~ ^[0-9]+$ ]] || [ "$CARGO_MINOR" -lt 80 ]; then
     echo "⚠️ Upgrading Rust to modern stable (current: $CARGO_VER, requires >= 1.80)..."
     if command -v rustup &> /dev/null; then
         rustup default stable
         rustup update stable
     else
-        curl -4 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable || \
-        wget -qO- https://sh.rustup.rs | sh -s -- -y --default-toolchain stable || \
-        (sudo apt-get install -y rustup && rustup default stable)
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable || \
+        (sudo apt-get install -y rustup 2>/dev/null && rustup default stable) || true
     fi
     export PATH="$HOME/.cargo/bin:/root/.cargo/bin:$PATH"
     [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
 fi
-echo "✓ Cargo version: $(cargo -v)"
+echo "✓ Cargo version: $(cargo --version 2>/dev/null || echo 'not found')"
 
 # 4. Hardware Input Permissions (/dev/input evdev group)
 echo -e "\n\033[1;36m[4/5] Checking /dev/input permissions for hardware isolation...\033[0m"
