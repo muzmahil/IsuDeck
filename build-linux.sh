@@ -73,9 +73,26 @@ if [ -f "$HOME/.cargo/env" ]; then
 fi
 
 if ! command -v cargo &> /dev/null; then
-    echo "⚠️ Cargo not found. Installing Rust and Cargo automatically via rustup..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    source "$HOME/.cargo/env"
+    echo "⚠️ Cargo not found. Installing Rust and Cargo..."
+    if command -v apt-get &> /dev/null; then
+        sudo apt-get update -y
+        sudo apt-get install -y cargo rustc || {
+            echo "Package manager fallback: trying rustup..."
+            curl -sSf https://sh.rustup.rs | sh -s -- -y || true
+        }
+    elif command -v dnf &> /dev/null; then
+        sudo dnf install -y cargo rust
+    elif command -v pacman &> /dev/null; then
+        sudo pacman -S --needed --noconfirm cargo rust
+    fi
+    if [ -f "$HOME/.cargo/env" ]; then
+        source "$HOME/.cargo/env"
+    fi
+fi
+
+if ! command -v cargo &> /dev/null; then
+    echo -e "\033[1;31m[ERROR] Cargo could not be found. Please install Rust manually via: sudo apt install cargo\033[0m"
+    exit 1
 fi
 echo "✓ Cargo version: $(cargo -v)"
 
