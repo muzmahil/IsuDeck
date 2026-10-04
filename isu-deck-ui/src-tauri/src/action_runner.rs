@@ -89,28 +89,82 @@ impl ActionRunner {
                 }
             }
             "SCREENSHOT" => {
+                #[cfg(windows)]
                 PlatformActions::simulate_hotkey("WIN+SHIFT+S");
+                #[cfg(target_os = "linux")]
+                {
+                    // Try common screenshot tools in order
+                    use std::process::Command;
+                    if Command::new("gnome-screenshot").arg("-i").spawn().is_err() {
+                        if Command::new("scrot").arg("-s").spawn().is_err() {
+                            let _ = Command::new("flameshot").arg("gui").spawn();
+                        }
+                    }
+                }
             }
             "CLIPBOARD_HISTORY" => {
+                #[cfg(windows)]
                 PlatformActions::simulate_hotkey("WIN+V");
+                #[cfg(target_os = "linux")]
+                {
+                    use std::process::Command;
+                    // Try common clipboard managers
+                    if Command::new("copyq").arg("toggle").spawn().is_err() {
+                        let _ = Command::new("clipman").arg("pick").spawn();
+                    }
+                }
             }
             "SHOW_DESKTOP" => {
+                #[cfg(windows)]
                 PlatformActions::simulate_hotkey("WIN+D");
+                #[cfg(target_os = "linux")]
+                PlatformActions::simulate_hotkey("super+d");
             }
             "TASK_MANAGER" => {
+                #[cfg(windows)]
                 PlatformActions::simulate_hotkey("CTRL+SHIFT+ESC");
+                #[cfg(target_os = "linux")]
+                {
+                    use std::process::Command;
+                    if Command::new("gnome-system-monitor").spawn().is_err() {
+                        if Command::new("xfce4-taskmanager").spawn().is_err() {
+                            let _ = Command::new("sh").args(["-c", "x-terminal-emulator -e htop || xterm -e htop"]).spawn();
+                        }
+                    }
+                }
             }
             "CLOSE_WINDOW" => {
+                #[cfg(windows)]
                 PlatformActions::simulate_hotkey("ALT+F4");
+                #[cfg(target_os = "linux")]
+                PlatformActions::simulate_hotkey("alt+F4");
             }
             "LOCK_SCREEN" => {
+                #[cfg(windows)]
                 PlatformActions::simulate_hotkey("WIN+L");
+                #[cfg(target_os = "linux")]
+                {
+                    use std::process::Command;
+                    if Command::new("gnome-screensaver-command").arg("-l").spawn().is_err() {
+                        if Command::new("xdg-screensaver").arg("lock").spawn().is_err() {
+                            if Command::new("loginctl").arg("lock-session").spawn().is_err() {
+                                let _ = Command::new("xlock").spawn();
+                            }
+                        }
+                    }
+                }
             }
             "VIRTUAL_DESKTOP_LEFT" => {
+                #[cfg(windows)]
                 PlatformActions::simulate_hotkey("WIN+CTRL+LEFT");
+                #[cfg(target_os = "linux")]
+                PlatformActions::simulate_hotkey("ctrl+alt+Left");
             }
             "VIRTUAL_DESKTOP_RIGHT" => {
+                #[cfg(windows)]
                 PlatformActions::simulate_hotkey("WIN+CTRL+RIGHT");
+                #[cfg(target_os = "linux")]
+                PlatformActions::simulate_hotkey("ctrl+alt+Right");
             }
             "TYPE_TEXT" => {
                 let text = action.get("text").and_then(|v| v.as_str()).unwrap_or("");

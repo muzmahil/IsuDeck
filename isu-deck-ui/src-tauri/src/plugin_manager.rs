@@ -237,10 +237,28 @@ impl PluginManager {
                 if let Ok(dir_entries) = fs::read_dir(&path) {
                     for f in dir_entries.flatten() {
                         let p = f.path();
-                        if p.is_file() && p.extension().map(|e| e == "exe").unwrap_or(false) {
-                            if let Some(n) = p.file_name().and_then(|n| n.to_str()) {
-                                exe_name = n.to_string();
-                                break;
+                        if p.is_file() {
+                            #[cfg(windows)]
+                            let is_exec = p.extension().map(|e| e == "exe").unwrap_or(false);
+
+                            #[cfg(not(windows))]
+                            let is_exec = {
+                                use std::os::unix::fs::PermissionsExt;
+                                // Accept files with no extension OR common Linux plugin patterns (.sh, .py, native binary)
+                                let has_no_unwanted_ext = p.extension()
+                                    .map(|e| !matches!(e.to_str().unwrap_or(""), "json" | "md" | "txt" | "log" | "dll" | "so"))
+                                    .unwrap_or(true);
+                                let is_executable = std::fs::metadata(&p)
+                                    .map(|m| m.permissions().mode() & 0o111 != 0)
+                                    .unwrap_or(false);
+                                has_no_unwanted_ext && is_executable
+                            };
+
+                            if is_exec {
+                                if let Some(n) = p.file_name().and_then(|n| n.to_str()) {
+                                    exe_name = n.to_string();
+                                    break;
+                                }
                             }
                         }
                     }

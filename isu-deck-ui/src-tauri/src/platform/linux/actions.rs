@@ -121,11 +121,56 @@ impl LinuxActions {
     }
 
     pub fn simulate_hotkey(combo: &str) {
-        // xdotool / ydotool desteği
-        let _ = Command::new("xdotool").args(["key", combo]).spawn();
+        // Normalize Windows-style key combos to xdotool format
+        // e.g., "WIN+CTRL+LEFT" -> "super+ctrl+Left"
+        let normalized = combo
+            .split('+')
+            .map(|part| match part.trim().to_uppercase().as_str() {
+                "WIN" | "SUPER" | "META" => "super",
+                "CTRL" | "CONTROL" => "ctrl",
+                "ALT" => "alt",
+                "SHIFT" => "shift",
+                "ESC" | "ESCAPE" => "Escape",
+                "LEFT" => "Left",
+                "RIGHT" => "Right",
+                "UP" => "Up",
+                "DOWN" => "Down",
+                "SPACE" => "space",
+                "ENTER" | "RETURN" => "Return",
+                "TAB" => "Tab",
+                "BACKSPACE" => "BackSpace",
+                "DELETE" | "DEL" => "Delete",
+                "HOME" => "Home",
+                "END" => "End",
+                "PAGEUP" | "PAGE_UP" => "Prior",
+                "PAGEDOWN" | "PAGE_DOWN" => "Next",
+                "F1" => "F1", "F2" => "F2", "F3" => "F3", "F4" => "F4",
+                "F5" => "F5", "F6" => "F6", "F7" => "F7", "F8" => "F8",
+                "F9" => "F9", "F10" => "F10", "F11" => "F11", "F12" => "F12",
+                other => {
+                    // Single character: pass as lowercase
+                    if other.len() == 1 {
+                        // Box to avoid lifetime issues; safe for short-lived use
+                        return other.to_lowercase().chars().next()
+                            .map(|c| if c.is_alphabetic() { c.to_string() } else { other.to_string() })
+                            .unwrap_or_else(|| other.to_string());
+                    }
+                    other.to_string()
+                }
+            })
+            .collect::<Vec<String>>()
+            .join("+");
+
+        // Try X11 xdotool first, fall back to ydotool (Wayland)
+        if Command::new("xdotool").args(["key", &normalized]).spawn().is_err() {
+            let _ = Command::new("ydotool").args(["key", &normalized]).spawn();
+        }
     }
 
     pub fn type_text_string(text: &str) {
-        let _ = Command::new("xdotool").args(["type", "--delay", "5", text]).spawn();
+        // Try X11 xdotool first, fall back to ydotool (Wayland)
+        if Command::new("xdotool").args(["type", "--delay", "5", text]).spawn().is_err() {
+            let _ = Command::new("ydotool").args(["type", text]).spawn();
+        }
     }
 }
