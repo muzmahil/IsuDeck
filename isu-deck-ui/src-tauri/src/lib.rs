@@ -12,7 +12,7 @@ use tauri::{
     command,
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
+    Emitter, Manager, WindowEvent,
 };
 
 use action_runner::ActionRunner;
@@ -373,107 +373,132 @@ async fn send_action(
 ) -> Result<(), String> {
     let parsed: serde_json::Value = match serde_json::from_str(&action_data) {
         Ok(v) => v,
-        Err(e) => {
-            eprintln!("[RUST ENGINE] send_action JSON ayrıştırma hatası: {}", e);
-            return Err(e.to_string());
-        }
+        Err(_) => return Ok(()),
     };
 
-    let action_type = parsed.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    let msg_type = parsed.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
-    match action_type {
-        "UPDATE_BLOCK_LIST" => {
-            if let Some(list) = parsed.get("list").and_then(|v| v.as_array()) {
+    match msg_type {
+        "ping" => {
+            let _ = app.emit("INPUT_EVENT", serde_json::json!({ "type": "pong" }).to_string());
+        }
+        "init_block_list" => {
+            if let Some(blocks) = parsed.get("blocks").and_then(|v| v.as_array()) {
                 let mut new_set = HashSet::new();
-                for item in list {
-                    if let (Some(hid), Some(key)) = (
-                        item.get("hid").and_then(|v| v.as_str()),
-                        item.get("key").and_then(|v| v.as_u64()),
-                    ) {
-                        new_set.insert((hid.to_string(), key as u16));
+                for b in blocks {
+                    let hid = b.get("hid").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let key = b.get("key").and_then(|v| {
+                        v.as_u64().map(|n| n as u16)
+                            .or_else(|| v.as_str().and_then(|s| s.parse::<u16>().ok()))
+                    });
+                    if key.is_some() {
+                        new_set.insert((hid, key.unwrap()));
                     }
                 }
+                println!("[RUST ENGINE] Blok listesi güncellendi: {} tuş", new_set.len());
                 let mut lock = state.block_list.lock().unwrap();
                 *lock = new_set;
             }
         }
+        "SET_MINIMIZE_TO_TRAY" => {
+            if let Some(val) = parsed.get("value").and_then(|v| v.as_bool()) {
+                let mut lock = state.minimize_to_tray.lock().unwrap();
+                *lock = val;
+                println!("[RUST ENGINE] Minimize to tray güncellendi: {}", val);
+            }
+        }
+        "SET_SYSTEM_VOLUME" => {
+            let percent = parsed.get("percent")
+                .and_then(|v| v.as_f64().or_else(|| v.as_str()?.parse().ok()))
+                .unwrap_or(50.0);
+            crate::platform::PlatformActions::set_system_master_volume(percent);
+        }
         "EXECUTE_ACTION" => {
-            if let Some(act) = parsed.get("action") {
-                let raw_type = act.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                let def_id = act.get("definitionId").and_then(|v| v.as_str()).unwrap_or("");
+            if let Some(action_data_obj) = parsed.get("actionData") {
+                if let Some(actions) = action_data_obj.get("actions").and_then(|v| v.as_array()) {
+                    for act in actions {
+                        let raw_type = act.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                        let def_id = act.get("definitionId").and_then(|v| v.as_str()).unwrap_or("");
 
-                let is_core = matches!(
-                    raw_type,
-                    "OPEN_APP"
-                        | "OPEN_URL"
-                        | "HOTKEY"
-                        | "MEDIA_BUTTON"
-                        | "PLAY_SOUND"
-                        | "DELAY"
-                        | "SET_SYSTEM_VOLUME"
-                        | "ADJUST_SYSTEM_VOLUME"
-                        | "SET_SYSTEM_MUTE"
-                        | "BRIGHTNESS_UP"
-                        | "BRIGHTNESS_DOWN"
-                        | "EMPTY_RECYCLE_BIN"
-                        | "SYSTEM_SLEEP"
-                        | "SCREENSHOT"
-                        | "CLIPBOARD_HISTORY"
-                        | "SHOW_DESKTOP"
-                        | "TASK_MANAGER"
-                        | "CLOSE_WINDOW"
-                        | "LOCK_SCREEN"
-                        | "TYPE_TEXT"
-                        | "RUN_COMMAND"
-                        | "OPEN_FOLDER"
-                        | "VIRTUAL_DESKTOP_LEFT"
-                        | "VIRTUAL_DESKTOP_RIGHT"
-                ) || matches!(
-                    def_id,
-                    "OPEN_APP"
-                        | "OPEN_URL"
-                        | "HOTKEY"
-                        | "MEDIA_BUTTON"
-                        | "PLAY_SOUND"
-                        | "DELAY"
-                        | "SET_SYSTEM_VOLUME"
-                        | "ADJUST_SYSTEM_VOLUME"
-                        | "SET_SYSTEM_MUTE"
-                        | "VOLUME_UP"
-                        | "VOLUME_DOWN"
-                        | "MUTE"
-                        | "MEDIA_PLAY"
-                        | "MEDIA_STOP"
-                        | "MEDIA_NEXT"
-                        | "MEDIA_PREVIOUS"
-                        | "BRIGHTNESS_UP"
-                        | "BRIGHTNESS_DOWN"
-                        | "EMPTY_RECYCLE_BIN"
-                        | "SYSTEM_SLEEP"
-                        | "SCREENSHOT"
-                        | "CLIPBOARD_HISTORY"
-                        | "SHOW_DESKTOP"
-                        | "TASK_MANAGER"
-                        | "CLOSE_WINDOW"
-                        | "LOCK_SCREEN"
-                        | "TYPE_TEXT"
-                        | "RUN_COMMAND"
-                        | "OPEN_FOLDER"
-                        | "VIRTUAL_DESKTOP_LEFT"
-                        | "VIRTUAL_DESKTOP_RIGHT"
-                );
+                        if matches!(raw_type, "SET_VARIABLE" | "CHANGE_VARIABLE" | "IF_CONDITION" | "LOOP_REPEAT")
+                            || matches!(def_id, "SET_VARIABLE" | "CHANGE_VARIABLE" | "IF_CONDITION" | "LOOP_REPEAT") {
+                            continue;
+                        }
 
-                if is_core {
-                    println!("[RUST ENGINE] Core Action çalıştırılıyor: '{}' / '{}'", raw_type, def_id);
-                    ActionRunner::run_action(act).await;
-                } else {
-                    let lookup_key = if !raw_type.is_empty() && raw_type != "UNKNOWN" { raw_type } else { def_id };
-                    if let Some(res) = state.plugin_manager.handle_execute(lookup_key, act) {
-                        println!("[RUST ENGINE] Eklenti Aksiyon: {} - {}", res.success, res.message);
-                    } else if let Some(res) = state.plugin_manager.handle_execute(def_id, act) {
-                        println!("[RUST ENGINE] Eklenti Aksiyon (def_id): {} - {}", res.success, res.message);
-                    } else {
-                        println!("[RUST ENGINE] Eklenti Aksiyon işleyicisi bulunamadı: '{}' / '{}'", raw_type, def_id);
+                        let is_core = matches!(
+                            raw_type,
+                            "OPEN_APP"
+                                | "OPEN_URL"
+                                | "HOTKEY"
+                                | "MEDIA_BUTTON"
+                                | "PLAY_SOUND"
+                                | "DELAY"
+                                | "SET_SYSTEM_VOLUME"
+                                | "ADJUST_SYSTEM_VOLUME"
+                                | "SET_SYSTEM_MUTE"
+                                | "BRIGHTNESS_UP"
+                                | "BRIGHTNESS_DOWN"
+                                | "EMPTY_RECYCLE_BIN"
+                                | "SYSTEM_SLEEP"
+                                | "SCREENSHOT"
+                                | "CLIPBOARD_HISTORY"
+                                | "SHOW_DESKTOP"
+                                | "TASK_MANAGER"
+                                | "CLOSE_WINDOW"
+                                | "LOCK_SCREEN"
+                                | "TYPE_TEXT"
+                                | "RUN_COMMAND"
+                                | "OPEN_FOLDER"
+                                | "VIRTUAL_DESKTOP_LEFT"
+                                | "VIRTUAL_DESKTOP_RIGHT"
+                        ) || matches!(
+                            def_id,
+                            "OPEN_APP"
+                                | "OPEN_URL"
+                                | "HOTKEY"
+                                | "MEDIA_BUTTON"
+                                | "PLAY_SOUND"
+                                | "DELAY"
+                                | "SET_SYSTEM_VOLUME"
+                                | "ADJUST_SYSTEM_VOLUME"
+                                | "SET_SYSTEM_MUTE"
+                                | "VOLUME_UP"
+                                | "VOLUME_DOWN"
+                                | "MUTE"
+                                | "MEDIA_PLAY"
+                                | "MEDIA_STOP"
+                                | "MEDIA_NEXT"
+                                | "MEDIA_PREVIOUS"
+                                | "BRIGHTNESS_UP"
+                                | "BRIGHTNESS_DOWN"
+                                | "EMPTY_RECYCLE_BIN"
+                                | "SYSTEM_SLEEP"
+                                | "SCREENSHOT"
+                                | "CLIPBOARD_HISTORY"
+                                | "SHOW_DESKTOP"
+                                | "TASK_MANAGER"
+                                | "CLOSE_WINDOW"
+                                | "LOCK_SCREEN"
+                                | "TYPE_TEXT"
+                                | "RUN_COMMAND"
+                                | "OPEN_FOLDER"
+                                | "VIRTUAL_DESKTOP_LEFT"
+                                | "VIRTUAL_DESKTOP_RIGHT"
+                        );
+
+                        if is_core {
+                            println!("[RUST ENGINE] Core Action çalıştırılıyor: '{}' / '{}'", raw_type, def_id);
+                            ActionRunner::run_action(act).await;
+                        } else {
+                            let lookup_key = if !raw_type.is_empty() && raw_type != "UNKNOWN" { raw_type } else { def_id };
+                            if let Some(res) = state.plugin_manager.handle_execute(lookup_key, act) {
+                                println!("[RUST ENGINE] Eklenti Aksiyon: {} - {}", res.success, res.message);
+                            } else if let Some(res) = state.plugin_manager.handle_execute(def_id, act) {
+                                println!("[RUST ENGINE] Eklenti Aksiyon (def_id): {} - {}", res.success, res.message);
+                            } else {
+                                println!("[RUST ENGINE] Eklenti Aksiyon işleyicisi bulunamadı: '{}' / '{}'", raw_type, def_id);
+                            }
+                        }
                     }
                 }
             }
@@ -497,12 +522,6 @@ async fn send_action(
             if let Ok(root) = isudeck_root(&app) {
                 let plugins_dir = root.join("plugins");
                 state.plugin_manager.reload_all(&plugins_dir);
-            }
-        }
-        "SET_MINIMIZE_TO_TRAY" => {
-            if let Some(val) = parsed.get("value").and_then(|v| v.as_bool()) {
-                let mut lock = state.minimize_to_tray.lock().unwrap();
-                *lock = val;
             }
         }
         _ => {}
