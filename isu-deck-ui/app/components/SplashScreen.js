@@ -17,55 +17,64 @@ export default function SplashScreen({ onReady }) {
   const [isError, setIsError] = useState(false);
 
   useEffect(() => {
+    // Helper: runs a promise with a timeout, resolves to fallback on timeout
+    const withTimeout = (promise, ms, fallback) =>
+      Promise.race([
+        promise,
+        new Promise((resolve) => setTimeout(() => resolve(fallback), ms))
+      ]);
+
     const runSystemChecks = async () => {
       // 1. Sistem Bütünlüğü
       setStatus(isTr ? 'Sistem dosyaları kontrol ediliyor...' : 'Checking system files...');
       setProgress(10);
-      await new Promise((r) => setTimeout(r, 600));
+      await new Promise((r) => setTimeout(r, 400));
 
-      // 2. Dosya Sistemi (Tauri FS)
+      // 2. Dosya Sistemi (Tauri FS) - 3s timeout per op
       setStatus(isTr ? 'Dosya sistemi ve profiller kontrol ediliyor...' : 'Verifying file system and profiles...');
       setProgress(30);
 
       try {
-        // 1. Ana Klasörü Başlat
-        await fileSystem.init();
-
-        // 2. Ayarlar Dosyası
-        const defaultSettings = { theme: 'dark', port: 12345 };
-        await fileSystem.ensureFile('settings.json', defaultSettings);
-
-        // 3. Profil Dosyası
-        const defaultProfiles = [{ id: 'default', name: 'Main Profile', buttons: Array(15).fill(null) }];
-        await fileSystem.ensureFile('profiles.json', defaultProfiles);
-        
+        await withTimeout(fileSystem.init(), 3000, null);
+        await withTimeout(fileSystem.ensureFile('settings.json', { theme: 'dark', port: 12345 }), 3000, null);
+        await withTimeout(fileSystem.ensureFile('profiles.json', [{ id: 'default', name: 'Main Profile', buttons: Array(15).fill(null) }]), 3000, null);
       } catch (e) {
-        console.warn('Dosya sistemi başlatılamadı:', e);
+        console.warn('File system init failed (non-fatal):', e);
       }
-      
-      await new Promise((r) => setTimeout(r, 600));
 
-      // 5. Pluginler
+      await new Promise((r) => setTimeout(r, 300));
+
+      // 5. Pluginler - 5s timeout
       setStatus(isTr ? 'Eklentiler taranıyor...' : 'Scanning plugins...');
       setProgress(90);
       try {
-        const loadedPlugins = await fileSystem.scanPlugins();
+        const loadedPlugins = await withTimeout(fileSystem.scanPlugins(), 5000, []);
         useStore.getState().setPlugins(loadedPlugins);
         useStore.getState().sendToEngine({ type: 'LOAD_PLUGINS' });
       } catch (e) {
-        console.error('Plugin yükleme hatası:', e);
+        console.error('Plugin scan error (non-fatal):', e);
       }
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 200));
 
-      // Bitti
+      // Done
       setStatus(isTr ? 'Hazır!' : 'Ready!');
       setProgress(100);
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 200));
       
       onReady();
     };
 
-    runSystemChecks();
+    // Overall fallback: never get stuck on splash screen longer than 4.5 seconds
+    const fallbackTimer = setTimeout(() => {
+      console.warn('Splash screen checks timed out, proceeding to app...');
+      onReady();
+    }, 4500);
+
+    runSystemChecks().finally(() => {
+      clearTimeout(fallbackTimer);
+    });
+
+    return () => clearTimeout(fallbackTimer);
   }, [onReady, isTr]);
 
   // --- DÜZELTME 2: Kapatma Fonksiyonu ---
