@@ -123,39 +123,42 @@ impl LinuxActions {
     pub fn simulate_hotkey(combo: &str) {
         // Normalize Windows-style key combos to xdotool format
         // e.g., "WIN+CTRL+LEFT" -> "super+ctrl+Left"
-        let normalized = combo
+        let normalized: String = combo
             .split('+')
-            .map(|part| match part.trim().to_uppercase().as_str() {
-                "WIN" | "SUPER" | "META" => "super",
-                "CTRL" | "CONTROL" => "ctrl",
-                "ALT" => "alt",
-                "SHIFT" => "shift",
-                "ESC" | "ESCAPE" => "Escape",
-                "LEFT" => "Left",
-                "RIGHT" => "Right",
-                "UP" => "Up",
-                "DOWN" => "Down",
-                "SPACE" => "space",
-                "ENTER" | "RETURN" => "Return",
-                "TAB" => "Tab",
-                "BACKSPACE" => "BackSpace",
-                "DELETE" | "DEL" => "Delete",
-                "HOME" => "Home",
-                "END" => "End",
-                "PAGEUP" | "PAGE_UP" => "Prior",
-                "PAGEDOWN" | "PAGE_DOWN" => "Next",
-                "F1" => "F1", "F2" => "F2", "F3" => "F3", "F4" => "F4",
-                "F5" => "F5", "F6" => "F6", "F7" => "F7", "F8" => "F8",
-                "F9" => "F9", "F10" => "F10", "F11" => "F11", "F12" => "F12",
-                other => {
-                    // Single character: pass as lowercase
-                    if other.len() == 1 {
-                        // Box to avoid lifetime issues; safe for short-lived use
-                        return other.to_lowercase().chars().next()
-                            .map(|c| if c.is_alphabetic() { c.to_string() } else { other.to_string() })
-                            .unwrap_or_else(|| other.to_string());
+            .map(|part| -> String {
+                match part.trim().to_uppercase().as_str() {
+                    "WIN" | "SUPER" | "META" => "super".to_string(),
+                    "CTRL" | "CONTROL"       => "ctrl".to_string(),
+                    "ALT"                    => "alt".to_string(),
+                    "SHIFT"                  => "shift".to_string(),
+                    "ESC" | "ESCAPE"         => "Escape".to_string(),
+                    "LEFT"                   => "Left".to_string(),
+                    "RIGHT"                  => "Right".to_string(),
+                    "UP"                     => "Up".to_string(),
+                    "DOWN"                   => "Down".to_string(),
+                    "SPACE"                  => "space".to_string(),
+                    "ENTER" | "RETURN"       => "Return".to_string(),
+                    "TAB"                    => "Tab".to_string(),
+                    "BACKSPACE"              => "BackSpace".to_string(),
+                    "DELETE" | "DEL"         => "Delete".to_string(),
+                    "HOME"                   => "Home".to_string(),
+                    "END"                    => "End".to_string(),
+                    "PAGEUP" | "PAGE_UP"     => "Prior".to_string(),
+                    "PAGEDOWN" | "PAGE_DOWN" => "Next".to_string(),
+                    "F1"  => "F1".to_string(),  "F2"  => "F2".to_string(),
+                    "F3"  => "F3".to_string(),  "F4"  => "F4".to_string(),
+                    "F5"  => "F5".to_string(),  "F6"  => "F6".to_string(),
+                    "F7"  => "F7".to_string(),  "F8"  => "F8".to_string(),
+                    "F9"  => "F9".to_string(),  "F10" => "F10".to_string(),
+                    "F11" => "F11".to_string(), "F12" => "F12".to_string(),
+                    other => {
+                        // Single alphabetic character: pass as-is (xdotool is case-sensitive)
+                        if other.len() == 1 && other.chars().next().map_or(false, |c| c.is_ascii_alphabetic()) {
+                            other.to_lowercase()
+                        } else {
+                            other.to_string()
+                        }
                     }
-                    other.to_string()
                 }
             })
             .collect::<Vec<String>>()
