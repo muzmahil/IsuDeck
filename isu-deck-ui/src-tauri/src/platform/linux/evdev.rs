@@ -12,24 +12,28 @@ pub fn start_linux_input_thread(
     std::thread::spawn(move || {
         println!("[LINUX ENGINE] Scanning /dev/input for keyboard devices...");
 
-        // Find all keyboard devices
+        // Find all keyboard devices: any device supporting standard keys
         let devices: Vec<(std::path::PathBuf, evdev::Device)> = evdev::enumerate()
             .filter(|(_, d)| {
                 d.supported_keys().map_or(false, |keys| {
-                    keys.contains(evdev::Key::KEY_ENTER) && keys.contains(evdev::Key::KEY_SPACE)
+                    // Check if device supports common keys (letters, space, enter or numpad)
+                    keys.contains(evdev::Key::KEY_ENTER) || 
+                    keys.contains(evdev::Key::KEY_SPACE) ||
+                    keys.contains(evdev::Key::KEY_A) ||
+                    keys.contains(evdev::Key::KEY_1)
                 })
             })
             .collect();
 
         if devices.is_empty() {
-            println!("[LINUX ENGINE] No keyboard devices found. Make sure the user is in the 'input' group.");
-            // Emit a status so the frontend can show a warning
+            println!("[LINUX ENGINE] No keyboard devices found. Make sure the user is in the 'input' group (sudo usermod -aG input $USER).");
             let _ = app_handle.emit(
                 "INPUT_EVENT",
                 serde_json::json!({
-                    "type": "engine_status",
-                    "status": "no_devices",
-                    "message": "No keyboard devices found. Run: sudo usermod -aG input $USER && reboot"
+                    "type": "SHOW_TOAST",
+                    "title": "Giriş Aygıtı Uyarısı",
+                    "message": "Klavye aygıtı okunamadı. 'input' grubunda olduğunuzdan emin olun (sudo usermod -aG input $USER).",
+                    "variant": "warning"
                 })
                 .to_string(),
             );
@@ -41,17 +45,6 @@ pub fn start_linux_input_thread(
             println!("  - {:?} ({})", path, dev.name().unwrap_or("unknown"));
         }
 
-        // Send ready status to frontend
-        let _ = app_handle.emit(
-            "INPUT_EVENT",
-            serde_json::json!({
-                "type": "engine_status",
-                "status": "ready",
-                "device_count": devices.len()
-            })
-            .to_string(),
-        );
-
         // Spawn one thread per keyboard device so they are read in parallel
         let mut handles = Vec::new();
         for (path, _dev) in devices {
@@ -60,61 +53,61 @@ pub fn start_linux_input_thread(
             let path_clone = path.clone();
 
             let handle = std::thread::spawn(move || {
-                // Re-open the device inside the thread for exclusive async read
                 let mut device = match evdev::Device::open(&path_clone) {
                     Ok(d) => d,
                     Err(e) => {
-                        eprintln!("[LINUX ENGINE] Cannot open {:?}: {}. Check 'input' group membership.", path_clone, e);
+                        eprintln!("[LINUX ENGINE] Cannot open {:?}: {}. (Permissions issue? Check input group or udev rules)", path_clone, e);
                         return;
                     }
                 };
 
-                // Build a unique device identifier from its path
-                let dev_hid = path_clone
+                let dev_name = device.name().unwrap_or("keyboard").to_string();
+                let dev_path_str = path_clone.to_string_lossy().to_string();
+                let dev_node = path_clone
                     .file_name()
                     .and_then(|n| n.to_str())
-                    .unwrap_or("unknown")
+                    .unwrap_or("event")
                     .to_string();
 
-                println!("[LINUX ENGINE] Listening on device: {} ({})", dev_hid, path_clone.display());
+                println!("[LINUX ENGINE] Listening on device: {} ({:?})", dev_name, path_clone);
 
                 loop {
-                    // fetch_events blocks until events are available
                     match device.fetch_events() {
                         Ok(events) => {
                             for ev in events {
-                                // Only handle EV_KEY events (key press / release)
                                 if ev.event_type() != evdev::EventType::KEY {
                                     continue;
                                 }
 
-                                let key_code = ev.code(); // raw scancode / HID usage
+                                let key_code = ev.code();
                                 let key_value = ev.value(); // 0 = release, 1 = press, 2 = repeat
 
-                                // key_value == 1 → key pressed
+                                // key_value == 1 (press)
                                 if key_value == 1 {
-                                    // Check if this (device, key) pair is in the block list
                                     let is_blocked = {
                                         let bl = block_list_clone.lock().unwrap();
-                                        bl.contains(&(dev_hid.clone(), key_code))
+                                        bl.contains(&(dev_node.clone(), key_code)) ||
+                                        bl.contains(&(dev_path_str.clone(), key_code)) ||
+                                        bl.contains(&(dev_name.clone(), key_code)) ||
+                                        bl.contains(&("*".to_string(), key_code))
                                     };
 
-                                    // Emit INPUT_EVENT to frontend regardless of block status
-                                    // (frontend decides which profile button to trigger)
+                                    // Emit event compatible with useStore / page.js / ActionEditor
                                     let event_payload = serde_json::json!({
-                                        "type": "key_press",
-                                        "hid": dev_hid,
+                                        "type": "inputPressed",
+                                        "hid": dev_node,
+                                        "deviceName": dev_name,
+                                        "devicePath": dev_path_str,
                                         "key": key_code,
                                         "blocked": is_blocked
                                     });
 
-                                    let _ = app_clone.emit("INPUT_EVENT", event_payload.to_string());
+                                    let _ = app_clone.emit("INPUT_EVENT", &event_payload);
                                 }
                             }
                         }
                         Err(e) => {
-                            eprintln!("[LINUX ENGINE] Error reading device {}: {}", dev_hid, e);
-                            // Device was unplugged or lost — stop this thread
+                            eprintln!("[LINUX ENGINE] Error reading device {}: {}", dev_node, e);
                             break;
                         }
                     }

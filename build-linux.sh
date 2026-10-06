@@ -119,15 +119,26 @@ if ! command -v cargo &> /dev/null || ! [[ "$CARGO_MINOR" =~ ^[0-9]+$ ]] || [ "$
 fi
 echo "✓ Cargo version: $(cargo --version 2>/dev/null || echo 'not found')"
 
-# 4. Hardware Input Permissions (/dev/input evdev group)
+# 4. Hardware Input Permissions (/dev/input evdev group & udev rules)
 echo -e "\n\033[1;36m[4/5] Checking /dev/input permissions for hardware isolation...\033[0m"
 if ! groups "$USER" | grep &>/dev/null '\binput\b'; then
-    echo "Adding user '$USER' to 'input' group for secondary keyboard hardware capture..."
+    echo "Adding user '$USER' to 'input' group for hardware keystroke capture..."
     sudo usermod -aG input "$USER"
-    echo -e "\033[1;33m[NOTE] You may need to log out and log back in once for 'input' group changes to take full effect.\033[0m"
+    echo -e "\033[1;33m[NOTE] You may need to log out and log back in once for 'input' group changes to take full effect in your active session.\033[0m"
 else
     echo "✓ User '$USER' is already a member of the 'input' group."
 fi
+
+# Ensure /dev/input/event* has read access for the input group via udev rule
+UDEV_RULE_FILE="/etc/udev/rules.d/99-isudeck-input.rules"
+if [ ! -f "$UDEV_RULE_FILE" ]; then
+    echo "Creating udev rule for /dev/input event access..."
+    echo 'KERNEL=="event*", SUBSYSTEM=="input", MODE="0660", GROUP="input"' | sudo tee "$UDEV_RULE_FILE" > /dev/null
+    sudo udevadm control --reload-rules && sudo udevadm trigger || true
+fi
+
+# Also set permissions for existing event devices in the current session so it works immediately
+sudo chmod -R g+r /dev/input 2>/dev/null || true
 
 # 5. Build Steps
 echo -e "\n\033[1;36m[5/5] Building IsuDeck...\033[0m"
