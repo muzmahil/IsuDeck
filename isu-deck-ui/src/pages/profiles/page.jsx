@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import useStore from '../../store/useStore';
 import { fileSystem } from '../../utils/fileSystem';
 
@@ -12,7 +11,6 @@ export default function ProfilesPage() {
   const [editModal, setEditModal] = useState({ show: false, id: null, name: '', icon: '📁' });
   const [modal, setModal] = useState({ show: false, type: 'alert', title: '', message: '', onConfirm: () => {} });
   const [draggedIndex, setDraggedIndex] = useState(null);
-  const router = useRouter();
 
   useEffect(() => {
     const loadProfiles = async () => {

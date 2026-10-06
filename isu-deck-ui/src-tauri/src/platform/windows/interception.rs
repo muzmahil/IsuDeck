@@ -148,7 +148,7 @@ pub fn start_windows_interception_thread(
     let dll_path = match find_interception_dll(&app_handle) {
         Some(p) => p,
         None => {
-            eprintln!("[RUST ENGINE] interception.dll bulunamadı.");
+            eprintln!("[RUST ENGINE] interception.dll not found.");
             return;
         }
     };
@@ -156,7 +156,7 @@ pub fn start_windows_interception_thread(
     let lib = match InterceptionLib::load(&dll_path) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("[RUST ENGINE] interception.dll yüklenemedi: {}", e);
+            eprintln!("[RUST ENGINE] Failed to load interception.dll: {}", e);
             return;
         }
     };
@@ -166,12 +166,12 @@ pub fn start_windows_interception_thread(
 
         let context = (lib.create_context)();
         if context.is_null() {
-            eprintln!("[RUST ENGINE] Interception context oluşturulamadı (Sürücü kurulu olmayabilir).");
+            eprintln!("[RUST ENGINE] Could not create Interception context (driver may not be installed).");
             return;
         }
 
         (lib.set_filter)(context, *lib.is_keyboard, INTERCEPTION_FILTER_KEY_ALL);
-        println!("🚀 [RUST ENGINE] Interception dinleyici thread devrede! (THREAD_PRIORITY_TIME_CRITICAL / 1ms Timer)");
+        println!("[RUST ENGINE] Interception listener active (THREAD_PRIORITY_TIME_CRITICAL / 1ms Timer)");
 
         let mut stroke = KeyStroke::default();
 

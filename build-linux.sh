@@ -75,7 +75,7 @@ if command -v node &> /dev/null; then
 fi
 
 if ! command -v npm &> /dev/null || [ "$NODE_MAJOR" -lt 20 ]; then
-    echo "⚠️ Node.js >= 20.9.0 is required for Next.js (current: $(node -v 2>/dev/null || echo 'none')). Upgrading Node.js..."
+    echo "[WARN] Node.js >= 20 is recommended (current: $(node -v 2>/dev/null || echo 'none')). Upgrading Node.js..."
     if command -v npm &> /dev/null; then
         sudo npm install -g n
         sudo n 20
@@ -90,8 +90,8 @@ if ! command -v npm &> /dev/null || [ "$NODE_MAJOR" -lt 20 ]; then
         sudo pacman -S --needed --noconfirm nodejs npm
     fi
 fi
-echo "✓ Node.js version: $(node -v)"
-echo "✓ npm version: $(npm -v)"
+echo "[OK] Node.js version: $(node -v)"
+echo "[OK] npm version: $(npm -v)"
 
 # 3. Rust & Cargo Check and Auto-Install (Requires modern Rust >= 1.80)
 echo -e "\n\033[1;36m[3/5] Checking Rust and Cargo...\033[0m"
@@ -106,7 +106,7 @@ CARGO_VER=$(cargo --version 2>/dev/null | awk '{print $2}' || echo "0.0.0")
 CARGO_MINOR=$(echo "$CARGO_VER" | cut -d'.' -f2 || echo "0")
 
 if ! command -v cargo &> /dev/null || ! [[ "$CARGO_MINOR" =~ ^[0-9]+$ ]] || [ "$CARGO_MINOR" -lt 80 ]; then
-    echo "⚠️ Upgrading Rust to modern stable (current: $CARGO_VER, requires >= 1.80)..."
+    echo "[WARN] Upgrading Rust to modern stable (current: $CARGO_VER, requires >= 1.80)..."
     if command -v rustup &> /dev/null; then
         rustup default stable
         rustup update stable
@@ -117,7 +117,7 @@ if ! command -v cargo &> /dev/null || ! [[ "$CARGO_MINOR" =~ ^[0-9]+$ ]] || [ "$
     export PATH="$HOME/.cargo/bin:/root/.cargo/bin:$PATH"
     [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
 fi
-echo "✓ Cargo version: $(cargo --version 2>/dev/null || echo 'not found')"
+echo "[OK] Cargo version: $(cargo --version 2>/dev/null || echo 'not found')"
 
 # 4. Hardware Input Permissions (/dev/input evdev group & udev rules)
 echo -e "\n\033[1;36m[4/5] Checking /dev/input permissions for hardware isolation...\033[0m"
@@ -126,7 +126,7 @@ if ! groups "$USER" | grep &>/dev/null '\binput\b'; then
     sudo usermod -aG input "$USER"
     echo -e "\033[1;33m[NOTE] You may need to log out and log back in once for 'input' group changes to take full effect in your active session.\033[0m"
 else
-    echo "✓ User '$USER' is already a member of the 'input' group."
+    echo "[OK] User '$USER' is already a member of the 'input' group."
 fi
 
 # Ensure /dev/input/event* has read access for the input group via udev rule
@@ -145,20 +145,20 @@ echo -e "\n\033[1;36m[5/5] Building IsuDeck...\033[0m"
 
 # Install fast linker if available (significantly speeds up Rust link time on Linux)
 if command -v mold &> /dev/null; then
-    echo "✓ Using mold linker (fast)"
+    echo "[OK] Using mold linker (fast)"
     export RUSTFLAGS="-C link-arg=-fuse-ld=mold"
 elif command -v lld &> /dev/null; then
-    echo "✓ Using lld linker (fast)"
+    echo "[OK] Using lld linker (fast)"
     export RUSTFLAGS="-C link-arg=-fuse-ld=lld"
 else
-    echo "ℹ️  No fast linker found (optional: sudo apt install mold)"
+    echo "[INFO] No fast linker found (optional: sudo apt install mold)"
 fi
 
 # Use all available CPU cores for compilation
 export CARGO_BUILD_JOBS=$(nproc)
-echo "✓ Using $CARGO_BUILD_JOBS CPU cores for compilation"
+echo "[OK] Using $CARGO_BUILD_JOBS CPU cores for compilation"
 
-echo "--> Installing Next.js frontend dependencies..."
+echo "--> Installing frontend dependencies..."
 cd "$SCRIPT_DIR/isu-deck-ui"
 # npm ci is faster and reproducible (uses lockfile exactly)
 if [ -f "package-lock.json" ]; then
@@ -167,8 +167,8 @@ else
     npm install
 fi
 
-echo "--> Building Next.js frontend (static export)..."
-NODE_ENV=production npm run build
+echo "--> Building frontend with Vite..."
+npm run build
 
 echo "--> Compiling native Linux release binary (optimized)..."
 cd "$SCRIPT_DIR/isu-deck-ui/src-tauri"

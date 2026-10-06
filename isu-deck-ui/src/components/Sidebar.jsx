@@ -1,18 +1,11 @@
-'use client';
-
-import { useEffect } from 'react';
-import { usePathname, useRouter } from 'next/navigation';
 import useStore from '../store/useStore';
 
 export default function Sidebar() {
-  const pathname = usePathname();
-  const router = useRouter();
   const { activeTab, setActiveTab, connectionStatus, latency, t, language, restartApp, settings } = useStore();
   const accentColor = settings?.accentColor || '#3b82f6';
 
-  const handleNavigation = (id, url) => {
-        router.push(url);
-        setActiveTab(id); 
+  const handleNavigation = (id) => {
+    setActiveTab(id); 
   };
   const statusConfig = {
     driver_missing: {
@@ -124,7 +117,7 @@ export default function Sidebar() {
         <div 
           onClick={() => {
             if (connectionStatus === 'driver_missing') {
-              handleNavigation('settings', '/settings');
+              handleNavigation('settings');
             } else if (connectionStatus === 'error' || connectionStatus === 'disconnected') {
               restartApp();
             }

@@ -37,6 +37,7 @@ tungstenite = "0.24"
 sha2 = "0.10"
 base64 = "0.22"
 futures-util = "0.3"
+tauri-plugin-autostart = "2"
 
 # --- Windows Özel Bağımlılıklar ---
 [target.'cfg(windows)'.dependencies]

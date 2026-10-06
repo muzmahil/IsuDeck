@@ -47,7 +47,7 @@ pub fn isudeck_root(_app: &tauri::AppHandle) -> Result<PathBuf, String> {
                 return Ok(exe_dir.to_path_buf());
             }
             for ancestor in exe_dir.ancestors() {
-                if ancestor.join("plugins").exists() && (ancestor.join("profiles.json").exists() || ancestor.join("plugins").join("IsuDeck.OBSPlugin").exists()) {
+                if ancestor.join("plugins").exists() && ancestor.join("profiles.json").exists() {
                     return Ok(ancestor.to_path_buf());
                 }
             }
@@ -65,40 +65,40 @@ pub fn isudeck_root(_app: &tauri::AppHandle) -> Result<PathBuf, String> {
     std::env::current_dir().map_err(|e| e.to_string())
 }
 
-// İlk açılışta gerekli tüm klasör ve dosyaları programın yanına açar
+// Ensure portable directories and default files are bootstrapped
 fn bootstrap_portable_environment(app: &tauri::AppHandle) {
     let root = match isudeck_root(app) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("[BOOTSTRAP] Kök dizin tespit edilemedi: {}", e);
+            eprintln!("[BOOTSTRAP] Unable to determine root directory: {}", e);
             return;
         }
     };
 
-    println!("📁 [BOOTSTRAP] IsuDeck Dizin: {}", root.display());
+    println!("[BOOTSTRAP] IsuDeck directory: {}", root.display());
 
     #[cfg(windows)]
     {
-        // 1. Windows: interception.dll yoksa oluştur
+        // 1. Windows: extract interception.dll if missing
         let dll_path = root.join("interception.dll");
         if !dll_path.exists() {
             let _ = fs::write(&dll_path, platform::windows::bootstrap::EMBEDDED_INTERCEPTION_DLL);
-            println!("✨ [BOOTSTRAP] interception.dll çıkartıldı.");
+            println!("[BOOTSTRAP] Extracted interception.dll.");
         }
 
-        // 2. Windows: drivers/install-interception.exe ve install_helper.cmd yoksa oluştur
+        // 2. Windows: extract drivers/install-interception.exe and install_helper.cmd if missing
         let drivers_dir = root.join("drivers");
         let _ = fs::create_dir_all(&drivers_dir);
         let installer_path = drivers_dir.join("install-interception.exe");
         if !installer_path.exists() {
             let _ = fs::write(&installer_path, platform::windows::bootstrap::EMBEDDED_INSTALLER);
-            println!("✨ [BOOTSTRAP] drivers/install-interception.exe çıkartıldı.");
+            println!("[BOOTSTRAP] Extracted drivers/install-interception.exe.");
         }
         let helper_path = drivers_dir.join("install_helper.cmd");
         let _ = fs::write(&helper_path, platform::windows::bootstrap::INSTALL_HELPER_CMD);
     }
 
-    // 3. sounds/ klasörü ve varsayılan sesleri oluştur
+    // 3. sounds/ directory and default sounds
     let sounds_dir = root.join("sounds");
     let _ = fs::create_dir_all(&sounds_dir);
     let click_path = sounds_dir.join("click.wav");
@@ -114,11 +114,11 @@ fn bootstrap_portable_environment(app: &tauri::AppHandle) {
         let _ = fs::write(&beep_path, EMBEDDED_SOUND_BEEP);
     }
 
-    // 4. plugins/ klasörünü oluştur
+    // 4. plugins/ directory
     let plugins_dir = root.join("plugins");
     let _ = fs::create_dir_all(&plugins_dir);
 
-    // 5. profiles.json yoksa varsayılan profil oluştur
+    // 5. Default profiles.json if missing
     let profiles_path = root.join("profiles.json");
     if !profiles_path.exists() {
         let default_profiles = serde_json::json!([
@@ -131,10 +131,10 @@ fn bootstrap_portable_environment(app: &tauri::AppHandle) {
             }
         ]);
         let _ = fs::write(&profiles_path, serde_json::to_string_pretty(&default_profiles).unwrap());
-        println!("✨ [BOOTSTRAP] profiles.json oluşturuldu.");
+        println!("[BOOTSTRAP] Created default profiles.json.");
     }
 
-    // 6. settings.json yoksa varsayılan ayarları oluştur (Sistem diline göre)
+    // 6. Default settings.json if missing
     let settings_path = root.join("settings.json");
     if !settings_path.exists() {
         let default_lang = platform::os::detect_system_language();
@@ -149,7 +149,7 @@ fn bootstrap_portable_environment(app: &tauri::AppHandle) {
             "disclaimerAccepted": false
         });
         let _ = fs::write(&settings_path, serde_json::to_string_pretty(&default_settings).unwrap());
-        println!("✨ [BOOTSTRAP] settings.json oluşturuldu (Dil: {}).", default_lang);
+        println!("[BOOTSTRAP] Created default settings.json (Language: {}).", default_lang);
     }
 }
 
@@ -395,7 +395,7 @@ async fn send_action(
                         new_set.insert((hid, key.unwrap()));
                     }
                 }
-                println!("[RUST ENGINE] Blok listesi güncellendi: {} tuş", new_set.len());
+                println!("[RUST ENGINE] Block list updated: {} keys", new_set.len());
                 let mut lock = state.block_list.lock().unwrap();
                 *lock = new_set;
             }
@@ -404,7 +404,7 @@ async fn send_action(
             if let Some(val) = parsed.get("value").and_then(|v| v.as_bool()) {
                 let mut lock = state.minimize_to_tray.lock().unwrap();
                 *lock = val;
-                println!("[RUST ENGINE] Minimize to tray güncellendi: {}", val);
+                println!("[RUST ENGINE] Minimize to tray updated: {}", val);
             }
         }
         "SET_SYSTEM_VOLUME" => {
@@ -487,16 +487,16 @@ async fn send_action(
                         );
 
                         if is_core {
-                            println!("[RUST ENGINE] Core Action çalıştırılıyor: '{}' / '{}'", raw_type, def_id);
+                            println!("[RUST ENGINE] Executing core action: '{}' / '{}'", raw_type, def_id);
                             ActionRunner::run_action(act).await;
                         } else {
                             let lookup_key = if !raw_type.is_empty() && raw_type != "UNKNOWN" { raw_type } else { def_id };
                             if let Some(res) = state.plugin_manager.handle_execute(lookup_key, act) {
-                                println!("[RUST ENGINE] Eklenti Aksiyon: {} - {}", res.success, res.message);
+                                println!("[RUST ENGINE] Plugin action: {} - {}", res.success, res.message);
                             } else if let Some(res) = state.plugin_manager.handle_execute(def_id, act) {
-                                println!("[RUST ENGINE] Eklenti Aksiyon (def_id): {} - {}", res.success, res.message);
+                                println!("[RUST ENGINE] Plugin action (def_id): {} - {}", res.success, res.message);
                             } else {
-                                println!("[RUST ENGINE] Eklenti Aksiyon işleyicisi bulunamadı: '{}' / '{}'", raw_type, def_id);
+                                println!("[RUST ENGINE] Plugin action handler not found: '{}' / '{}'", raw_type, def_id);
                             }
                         }
                     }
@@ -577,6 +577,24 @@ fn update_tray_language(lang: String, app: tauri::AppHandle) -> Result<(), Strin
     Ok(())
 }
 
+#[command]
+async fn get_autostart_status(app: tauri::AppHandle) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+#[command]
+async fn set_autostart(app: tauri::AppHandle, enable: bool) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let auto = app.autolaunch();
+    if enable {
+        auto.enable().map_err(|e| e.to_string())?;
+    } else {
+        auto.disable().map_err(|e| e.to_string())?;
+    }
+    auto.is_enabled().map_err(|e| e.to_string())
+}
+
 // ==========================================================
 // 6. ANA TAURI BAŞLATICI
 // ==========================================================
@@ -599,6 +617,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![]),
+        ))
         .plugin(tauri_plugin_log::Builder::default().build())
         .manage(engine_state)
         .invoke_handler(tauri::generate_handler![
@@ -617,7 +639,9 @@ pub fn run() {
             list_custom_sounds,
             play_sound_file,
             set_window_always_on_top,
-            update_tray_language
+            update_tray_language,
+            get_autostart_status,
+            set_autostart
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();

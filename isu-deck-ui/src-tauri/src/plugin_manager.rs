@@ -213,10 +213,10 @@ impl PluginManager {
                 }
             }
 
-            // Eklenti açık/kapalı (enabled) kontrolü (Kullanıcı tercihi)
+            // Plugin enabled / disabled check
             let is_enabled = config_val.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
             if !is_enabled {
-                println!("[PluginManager] Eklenti devre dışı (disabled): {}", plugin_name);
+                println!("[PluginManager] Plugin disabled: {}", plugin_name);
                 continue;
             }
 
@@ -271,14 +271,20 @@ impl PluginManager {
 
             let exe_path = path.join(&exe_name);
             if !exe_path.exists() {
-                println!("[PluginManager] Eklenti yürütücüsü bulunamadı: {:?}", exe_path);
+                println!("[PluginManager] Plugin executable not found: {:?}", exe_path);
                 continue;
             }
 
-            // 1. DURUM: Tek Seferlik (On-Demand / One-Shot) Eklenti
-            // Açılışta süreç başlatılmaz! Yalnızca aksiyon haritasına kaydedilir (0 MB RAM)
+            // On Linux, do not attempt to execute Windows .exe binaries
+            #[cfg(not(windows))]
+            if exe_name.to_lowercase().ends_with(".exe") {
+                // Windows-only binary on Linux, ignore execution
+                continue;
+            }
+
+            // 1. One-Shot Plugin
             if !is_daemon {
-                println!("[PluginManager] Tek seferlik (One-Shot) eklenti kaydedildi: {} (0 MB Idle RAM)", plugin_name);
+                println!("[PluginManager] Registered one-shot plugin: {} (0 MB idle RAM)", plugin_name);
                 if let Some(actions) = manifest.get("actions").and_then(|a| a.as_array()) {
                     let mut map = self.action_map.lock().unwrap();
                     for act in actions {
@@ -297,8 +303,7 @@ impl PluginManager {
                 continue;
             }
 
-            // 2. DURUM: Canlı / Arka Plan (Daemon) Eklenti
-            // Süreç zaten çalışıyor ve hayatta mı kontrol et
+            // 2. Daemon Plugin
             let mut already_running_proc: Option<Arc<RunningPluginProcess>> = None;
             {
                 let procs = self.processes.lock().unwrap();
@@ -315,7 +320,6 @@ impl PluginManager {
             }
 
             if let Some(proc) = already_running_proc {
-                println!("[PluginManager] Daemon eklenti zaten çalışıyor, config iletiliyor: {}", plugin_name);
                 proc.send_init(&config_val);
                 if let Some(actions) = manifest.get("actions").and_then(|a| a.as_array()) {
                     let mut map = self.action_map.lock().unwrap();
@@ -334,7 +338,7 @@ impl PluginManager {
                 continue;
             }
 
-            println!("[PluginManager] Daemon eklenti süreci başlatılıyor: {} ({:?})", plugin_name, exe_path);
+            println!("[PluginManager] Starting daemon plugin: {} ({:?})", plugin_name, exe_path);
 
             let mut cmd = Command::new(&exe_path);
             cmd.current_dir(&path)
@@ -348,7 +352,7 @@ impl PluginManager {
             let mut child = match cmd.spawn() {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("[PluginManager] Daemon eklenti başlatılamadı: {:?}, hata: {}", exe_path, e);
+                    eprintln!("[PluginManager] Failed to start daemon plugin: {:?}, error: {}", exe_path, e);
                     continue;
                 }
             };

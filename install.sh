@@ -131,7 +131,7 @@ EOF
 chmod +x "$LAUNCHER_WRAPPER"
 sudo cp "$LAUNCHER_WRAPPER" "$BIN_LINK"
 rm -f "$LAUNCHER_WRAPPER"
-echo -e "${GREEN}✓ Terminal command '$BIN_LINK' registered.${NC}"
+echo -e "${GREEN}[OK] Terminal command '$BIN_LINK' registered.${NC}"
 
 # 5. Desktop Application Shortcut (.desktop)
 echo -e "\n${CYAN}[5/5] Creating desktop application menu shortcut...${NC}"
@@ -157,8 +157,8 @@ update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
 echo -e "\n${GREEN}========================================================${NC}"
 echo -e "${GREEN}   SUCCESS: IsuDeck has been successfully installed!   ${NC}"
 echo -e "${GREEN}========================================================${NC}"
-echo -e "📂 Installed Directory : ${BOLD}$INSTALL_DIR${NC}"
-echo -e "💻 Terminal Launch     : Type ${BOLD}isudeck${NC} anywhere in your terminal"
-echo -e "🖥️ Desktop Menu        : 'IsuDeck' icon in your applications menu"
+echo -e "[-] Installed Directory : ${BOLD}$INSTALL_DIR${NC}"
+echo -e "[-] Terminal Launch     : Type ${BOLD}isudeck${NC} anywhere in your terminal"
+echo -e "[-] Desktop Menu        : 'IsuDeck' icon in your applications menu"
 echo -e "${YELLOW}[NOTE] If hardware key capture doesn't respond, log out and log back in once to apply 'input' group permissions.${NC}"
 echo -e "${GREEN}========================================================${NC}"

@@ -508,6 +508,35 @@ export default function SettingsPage() {
 
           <div className="h-px bg-white/5" />
 
+          {/* Sistem Açılınca Başlat (Auto Start) */}
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <span className="text-xs font-medium text-white">{language === 'tr' ? 'Sistem Açılınca Başlat' : 'Start on System Boot'}</span>
+              <p className="text-[11px] text-zinc-500">{language === 'tr' ? 'Bilgisayar açıldığında IsuDeck otomatik olarak başlasın' : 'Automatically launch IsuDeck when computer starts up'}</p>
+            </div>
+            <button
+              onClick={async () => {
+                const current = !!settings.autoStart;
+                const nextVal = !current;
+                updateSetting('autoStart', nextVal);
+                try {
+                  const { invoke } = await import('@tauri-apps/api/core');
+                  await invoke('set_autostart', { enable: nextVal });
+                } catch (e) {
+                  console.error('Failed to set autostart:', e);
+                }
+              }}
+              className={`w-10 h-5 rounded-full relative transition-colors cursor-pointer shrink-0 ${
+                settings.autoStart ? 'bg-blue-600' : 'bg-zinc-800'
+              }`}
+              style={settings.autoStart ? { backgroundColor: accentColor } : {}}
+            >
+              <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${settings.autoStart ? 'right-0.5' : 'left-0.5'}`} />
+            </button>
+          </div>
+
+          <div className="h-px bg-white/5" />
+
           {/* Varsayılan Başlık Göster */}
           <div className="flex items-center justify-between gap-4">
             <div>

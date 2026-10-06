@@ -257,7 +257,7 @@ impl ActionRunner {
                 PlatformActions::system_sleep();
             }
             _ => {
-                println!("[ActionRunner] Bilinmeyen temel eylem tipi: {}", action_type);
+                println!("[ActionRunner] Unknown action type: {}", action_type);
             }
         }
     }

@@ -19,21 +19,19 @@ node_modules/
 !*.yarn/releases
 !*.yarn/versions
 
-# --- Next.js & Frontend Build Outputs ---
+# --- Frontend & Build Outputs ---
+dist/
+**/dist/
+build/
+**/build/
 .next/
 **/.next/
 out/
 **/out/
-build/
-**/build/
-dist/
-**/dist/
-.vercel
 *.tsbuildinfo
-next-env.d.ts
 
 # --- Runtime & User Data ---
-# Kullanıcının yerel test profilleri ve ayarları (Repo'yu kirletmemesi için)
+# User local test profiles and settings (prevent repository pollution)
 profiles.json
 settings.json
 variables.json
@@ -46,8 +44,9 @@ yarn-debug.log*
 yarn-error.log*
 
 # --- Built Binaries ---
-# Derlenen uygulama binary'leri ve arşivleri (GitHub Releases üzerinden dağıtılır)
+# Built application binaries and archives (distributed via GitHub Releases)
 IsuDeck.exe
+IsuDeck-Linux-x64
 *.pdb
 *.ilk
 *.exp
@@ -56,7 +55,7 @@ release_package/
 *.tar.gz
 *.7z
 
-# Ancak sürücü yükleyici ve kütüphanesini repoda tut:
+# Keep driver installer and helper libraries in repository:
 !drivers/install-interception.exe
 !drivers/install_helper.cmd
 !interception.dll

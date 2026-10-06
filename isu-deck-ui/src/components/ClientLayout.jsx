@@ -1,7 +1,4 @@
-'use client';
-
 import { useState, useEffect, useRef } from 'react';
-import { usePathname } from 'next/navigation';
 import Sidebar from './Sidebar';
 import SplashScreen from './SplashScreen';
 import DisclaimerModal from './DisclaimerModal';
@@ -33,13 +30,13 @@ export default function ClientLayout({ children }) {
     updateSetting,
     plugins,
     lastHandledMsgId,
-    markMessageHandled
+    markMessageHandled,
+    activeTab
   } = useStore();
-  const pathname = usePathname();
-  const pathnameRef = useRef(pathname);
+  const activeTabRef = useRef(activeTab);
   useEffect(() => {
-    pathnameRef.current = pathname;
-  }, [pathname]);
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
 
   const [lastInputDisplay, setLastInputDisplay] = useState(null);
   const [executionFeedback, setExecutionFeedback] = useState(null);
@@ -230,9 +227,9 @@ export default function ClientLayout({ children }) {
             return;
           }
 
-          // Eğer Ana Sayfadaysak (/) bu bloğu atla, çünkü page.js zaten işliyor.
-          // Ama başka sayfadaysak (örn: Ayarlar, Profiller, Eklentiler), tuşların çalışması için burası lazım.
-          if (pathnameRef.current === '/') return;
+          // Eğer Ana Sayfadaysak ('deck') bu bloğu atla, çünkü page.js zaten işliyor.
+          // Ama başka sayfadaysak (örn: settings, profiles, plugins), tuşların çalışması için burası lazım.
+          if (activeTabRef.current === 'deck') return;
 
           // Mesajı işlendi olarak işaretle
           if (msgId) {

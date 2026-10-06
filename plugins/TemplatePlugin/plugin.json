@@ -6,8 +6,6 @@
   "author": "IsuDeck Developer",
   "license": "MIT",
   "icon": "icon.svg",
-  "executable": "plugin.exe",
-  "daemon": false,
   "readme": "README.md",
   "config": [
     {
