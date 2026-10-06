@@ -623,19 +623,23 @@ pub fn run() {
             let app_handle = app.handle().clone();
             state_clone.plugin_manager.set_app_handle(app_handle.clone());
 
-            // 1. Taşınabilir ortamı başlat
+            // 1. Bootstrap (fast - just creates dirs/files if missing)
             bootstrap_portable_environment(&app_handle);
 
-            // 2. Dış eklentileri plugins/ dizininden yükle
-            if let Ok(root) = isudeck_root(&app_handle) {
-                let plugins_dir = root.join("plugins");
-                state_clone.plugin_manager.load_plugins_from_dir(&plugins_dir);
-            }
+            // 2. Heavy work in background so the window appears immediately
+            let app_bg = app_handle.clone();
+            let state_bg = state_clone.clone();
+            std::thread::spawn(move || {
+                // Load plugins from disk (may be slow with many plugins)
+                if let Ok(root) = isudeck_root(&app_bg) {
+                    let plugins_dir = root.join("plugins");
+                    state_bg.plugin_manager.load_plugins_from_dir(&plugins_dir);
+                }
+                // Start platform input listener (evdev scan on Linux can be slow)
+                start_input_thread(app_bg, state_bg);
+            });
 
-            // 3. Platforma özgü giriş dinleyicisini başlat (Windows: Interception / Linux: evdev)
-            start_input_thread(app_handle, state_clone);
-
-            // 4. Tray Menü
+            // 3. Tray Menu (fast - must stay on main thread)
             let sys_lang = platform::os::detect_system_language();
             let (initial_show, initial_quit) = match sys_lang {
                 "en" => ("Show IsuDeck", "Quit"),

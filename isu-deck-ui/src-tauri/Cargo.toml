@@ -58,3 +58,10 @@ windows-sys = { version = "0.59", features = [
 [target.'cfg(target_os = "linux")'.dependencies]
 evdev = "0.12"
 
+# --- Optimized Release Profile ---
+[profile.release]
+opt-level = 3       # Maximum optimization
+lto = "thin"        # Link-Time Optimization (faster binary startup)
+codegen-units = 1   # Single codegen unit = better inlining
+strip = true        # Strip debug symbols (smaller binary, faster load)
+panic = "abort"     # No unwinding = smaller + faster

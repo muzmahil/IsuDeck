@@ -132,12 +132,34 @@ fi
 # 5. Build Steps
 echo -e "\n\033[1;36m[5/5] Building IsuDeck...\033[0m"
 
-echo "--> Installing and compiling Next.js frontend..."
-cd "$SCRIPT_DIR/isu-deck-ui"
-npm install
-npm run build
+# Install fast linker if available (significantly speeds up Rust link time on Linux)
+if command -v mold &> /dev/null; then
+    echo "✓ Using mold linker (fast)"
+    export RUSTFLAGS="-C link-arg=-fuse-ld=mold"
+elif command -v lld &> /dev/null; then
+    echo "✓ Using lld linker (fast)"
+    export RUSTFLAGS="-C link-arg=-fuse-ld=lld"
+else
+    echo "ℹ️  No fast linker found (optional: sudo apt install mold)"
+fi
 
-echo "--> Compiling native Linux release binary..."
+# Use all available CPU cores for compilation
+export CARGO_BUILD_JOBS=$(nproc)
+echo "✓ Using $CARGO_BUILD_JOBS CPU cores for compilation"
+
+echo "--> Installing Next.js frontend dependencies..."
+cd "$SCRIPT_DIR/isu-deck-ui"
+# npm ci is faster and reproducible (uses lockfile exactly)
+if [ -f "package-lock.json" ]; then
+    npm ci --prefer-offline 2>/dev/null || npm install
+else
+    npm install
+fi
+
+echo "--> Building Next.js frontend (static export)..."
+NODE_ENV=production npm run build
+
+echo "--> Compiling native Linux release binary (optimized)..."
 cd "$SCRIPT_DIR/isu-deck-ui/src-tauri"
 cargo build --release
 
@@ -147,9 +169,11 @@ BIN_DEST="$SCRIPT_DIR/IsuDeck-Linux-x64"
 if [ -f "$BIN_SRC" ]; then
     cp "$BIN_SRC" "$BIN_DEST"
     chmod +x "$BIN_DEST"
+    # Show binary size for info
+    BIN_SIZE=$(du -sh "$BIN_DEST" | cut -f1)
     echo -e "\n\033[1;32m========================================================\033[0m"
     echo -e "\033[1;32m SUCCESS: Linux native executable created!\033[0m"
-    echo -e "\033[1;32m Executable Path: $BIN_DEST\033[0m"
+    echo -e "\033[1;32m Executable: $BIN_DEST ($BIN_SIZE)\033[0m"
     echo -e "\033[1;32m To launch, run:\033[0m"
     echo -e "\033[1;33m   ./IsuDeck-Linux-x64\033[0m"
     echo -e "\033[1;32m========================================================\033[0m"

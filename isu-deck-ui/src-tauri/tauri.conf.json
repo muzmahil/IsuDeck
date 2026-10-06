@@ -13,7 +13,6 @@
     "windows": [
       {
         "title": "IsuDeck",
-        "devtools": true,
         "width": 1200,
         "height": 768,
         "resizable": true,
