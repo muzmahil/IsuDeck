@@ -30,7 +30,7 @@ npm run tauri dev
 ## 🏗️ Project Architecture
 
 - **`isu-deck-ui/src-tauri/`**: Rust backend engine, input capture thread (`interception.rs`), macro execution engine (`action_runner.rs`), and plugin supervisor (`plugin_manager.rs`).
-- **`isu-deck-ui/app/`**: Next.js 16 UI with Zustand state management and Tailwind CSS styling.
+- **`isu-deck-ui/src/`**: Vite + React 19 UI with Zustand state management and Tailwind CSS styling.
 - **`plugins/`**: Installed official and community plugins.
 - **`plugins-source/`**: Source code of built-in plugins (e.g. OBS Studio WebSocket plugin).
 - **`examples/plugins/`**: Reference implementations for one-shot and daemon plugins (Python, Node.js).

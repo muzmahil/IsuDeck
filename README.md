@@ -7,7 +7,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(64--bit)-blue?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/Built%20With-Tauri%20v2%20%2B%20Rust-orange?style=flat-square" alt="Rust Tauri">
-  <img src="https://img.shields.io/badge/Frontend-Next.js%2016%20(React)-black?style=flat-square" alt="Next.js">
+  <img src="https://img.shields.io/badge/Frontend-Vite%20%2B%20React%2019-646CFF?style=flat-square" alt="Vite + React">
   <img src="https://img.shields.io/badge/RAM%20Usage-%3C%2040%20MB-emerald?style=flat-square" alt="RAM Usage">
   <img src="https://img.shields.io/badge/License-GPL--3.0-purple?style=flat-square" alt="License">
 </p>
@@ -85,7 +85,7 @@ By default, Windows merges all attached keyboards into a single input stream. Pr
                  │ Tauri Events                  │ stdio JSON-RPC
                  ▼                               ▼
 ┌─────────────────────────────────┐   ┌───────────────────────────┐
-│       IsuDeck UI (Next.js)      │   │     External Plugins      │
+│     IsuDeck UI (Vite + React)   │   │     External Plugins      │
 │   • Profile & Button Editor     │   │   • OBS Studio (WebSocket)│
 │   • Realtime Live State Badges  │   │   • Custom Python/Node/Go │
 └─────────────────────────────────┘   └───────────────────────────┘
@@ -129,7 +129,7 @@ cd IsuDeck
 cd isu-deck-ui
 npm install
 
-# 3. Build Next.js frontend
+# 3. Build frontend (Vite)
 npm run build
 
 # 4. Build Rust backend
