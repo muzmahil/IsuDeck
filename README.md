@@ -119,7 +119,7 @@ By default, Windows merges all attached keyboards into a single input stream. Pr
 - **Node.js:** v18+ or v20+ with `npm`
 - **C++ Tools:** Visual Studio 2022 C++ Build Tools
 
-### Build Instructions
+### Build Instructions (Windows)
 ```bash
 # 1. Clone repository
 git clone https://github.com/muzmahil/IsuDeck.git
@@ -136,6 +136,22 @@ npm run build
 cd src-tauri
 cargo build --release
 ```
+
+---
+
+## 🐧 Linux Quick Install (Single Command)
+
+To install IsuDeck on any Linux system (Ubuntu, Mint, Debian, Fedora, Arch) into `~/IsuDeck` with a terminal command `isudeck` and an applications menu shortcut, run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/muzmahil/IsuDeck/main/install.sh | bash
+```
+
+After installation:
+- **Terminal Launch:** Type `isudeck` anywhere.
+- **Desktop Shortcut:** Search for **IsuDeck** in your applications menu.
+- **Directory:** All configuration, sounds, and plugins live in `~/IsuDeck`.
+
 
 ---
 
