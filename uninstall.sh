@@ -25,6 +25,15 @@ AUTOSTART_FILE="$HOME/.config/autostart/isudeck.desktop"
 AUTOSTART_FILE_ALT="$HOME/.config/autostart/IsuDeck.desktop"
 UDEV_RULE_FILE="/etc/udev/rules.d/99-isudeck-input.rules"
 
+# Confirmation prompt for interactive sessions
+if [ -t 0 ] && [ "$1" != "-y" ] && [ "$1" != "--yes" ]; then
+    read -r -p "Are you sure you want to completely uninstall IsuDeck? [y/N]: " confirm
+    if [[ ! "$confirm" =~ ^[yY]([eE][sS])?$ ]]; then
+        echo -e "${YELLOW}Uninstall cancelled.${NC}"
+        exit 0
+    fi
+fi
+
 # 1. Remove Terminal Command Link
 if [ -f "$BIN_LINK" ] || [ -L "$BIN_LINK" ]; then
     echo "--> Removing terminal launcher ($BIN_LINK)..."

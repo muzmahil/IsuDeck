@@ -117,13 +117,54 @@ echo -e "\n${CYAN}[4/5] Creating terminal command 'isudeck'...${NC}"
 LAUNCHER_WRAPPER="/tmp/isudeck-launcher"
 cat << 'EOF' > "$LAUNCHER_WRAPPER"
 #!/usr/bin/env bash
-# Fix WebKit compositing on Linux VMs
-export WEBKIT_DISABLE_COMPOSITING_MODE=1
-export WEBKIT_DISABLE_DMABUF_RENDERER=1
-
+# ==============================================================================
+# IsuDeck Terminal Command Launcher
+# ==============================================================================
 APP_DIR="$HOME/IsuDeck"
-cd "$APP_DIR"
-exec "$APP_DIR/IsuDeck-Linux-x64" "$@"
+
+case "$1" in
+    update|--update)
+        if [ -f "$APP_DIR/update.sh" ]; then
+            exec bash "$APP_DIR/update.sh"
+        elif [ -d "$APP_DIR/.git" ]; then
+            cd "$APP_DIR"
+            git fetch origin main
+            git reset --hard origin/main
+            exec bash "$APP_DIR/build-linux.sh"
+        else
+            exec bash -c "curl -fsSL https://raw.githubusercontent.com/muzmahil/IsuDeck/main/install.sh | bash"
+        fi
+        ;;
+    uninstall|--uninstall)
+        shift
+        if [ -f "$APP_DIR/uninstall.sh" ]; then
+            exec bash "$APP_DIR/uninstall.sh" "$@"
+        else
+            exec bash -c "curl -fsSL https://raw.githubusercontent.com/muzmahil/IsuDeck/main/uninstall.sh | bash"
+        fi
+        ;;
+    help|--help|-h)
+        echo "IsuDeck CLI commands:"
+        echo "  isudeck             - Launch IsuDeck application"
+        echo "  isudeck update      - Update IsuDeck to latest version and rebuild"
+        echo "  isudeck uninstall   - Completely uninstall IsuDeck from your system"
+        echo "  isudeck --help      - Show this help message"
+        exit 0
+        ;;
+    *)
+        export WEBKIT_DISABLE_COMPOSITING_MODE=1
+        export WEBKIT_DISABLE_DMABUF_RENDERER=1
+
+        if [ ! -f "$APP_DIR/IsuDeck-Linux-x64" ]; then
+            echo "[ERROR] IsuDeck executable not found at $APP_DIR/IsuDeck-Linux-x64"
+            echo "Run 'isudeck update' to build the application."
+            exit 1
+        fi
+
+        cd "$APP_DIR"
+        exec "$APP_DIR/IsuDeck-Linux-x64" "$@"
+        ;;
+esac
 EOF
 
 chmod +x "$LAUNCHER_WRAPPER"

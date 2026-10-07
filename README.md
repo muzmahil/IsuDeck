@@ -147,15 +147,14 @@ To install IsuDeck on any Linux system (Ubuntu, Mint, Debian, Fedora, Arch) into
 curl -fsSL https://raw.githubusercontent.com/muzmahil/IsuDeck/main/install.sh | bash
 ```
 
-After installation:
-- **Terminal Launch:** Type `isudeck` anywhere.
+After installation, manage IsuDeck directly from your terminal:
+- **Launch:** `isudeck`
+- **Update to Latest Version:** `isudeck update`
+- **Uninstall Completely:** `isudeck uninstall`
+- **Help:** `isudeck --help`
+
 - **Desktop Shortcut:** Search for **IsuDeck** in your applications menu.
 - **Directory:** All configuration, sounds, and plugins live in `~/IsuDeck`.
-
-To completely uninstall IsuDeck on Linux, run:
-```bash
-curl -fsSL https://raw.githubusercontent.com/muzmahil/IsuDeck/main/uninstall.sh | bash
-```
 
 
 ---
