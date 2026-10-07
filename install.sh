@@ -87,7 +87,7 @@ UDEV_RULE_FILE="/etc/udev/rules.d/99-isudeck-input.rules"
 if [ ! -f "$UDEV_RULE_FILE" ]; then
     echo "Configuring udev rules for keystroke capture..."
     echo 'KERNEL=="event*", SUBSYSTEM=="input", MODE="0660", GROUP="input"' | sudo tee "$UDEV_RULE_FILE" > /dev/null
-    sudo udevadm control --reload-rules && sudo udevadm trigger || true
+    sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=input --action=change || true
 fi
 sudo chmod -R g+r /dev/input 2>/dev/null || true
 

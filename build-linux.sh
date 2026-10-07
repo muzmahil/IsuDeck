@@ -134,7 +134,7 @@ UDEV_RULE_FILE="/etc/udev/rules.d/99-isudeck-input.rules"
 if [ ! -f "$UDEV_RULE_FILE" ]; then
     echo "Creating udev rule for /dev/input event access..."
     echo 'KERNEL=="event*", SUBSYSTEM=="input", MODE="0660", GROUP="input"' | sudo tee "$UDEV_RULE_FILE" > /dev/null
-    sudo udevadm control --reload-rules && sudo udevadm trigger || true
+    sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=input --action=change || true
 fi
 
 # Also set permissions for existing event devices in the current session so it works immediately
