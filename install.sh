@@ -104,12 +104,10 @@ else
     cd "$INSTALL_DIR"
 fi
 
-# Check if binary already built, otherwise build it
-if [ ! -f "$INSTALL_DIR/IsuDeck-Linux-x64" ]; then
-    echo -e "\n${YELLOW}Building IsuDeck binary via build-linux.sh...${NC}"
-    chmod +x "$INSTALL_DIR/build-linux.sh"
-    "$INSTALL_DIR/build-linux.sh"
-fi
+# Build binary
+echo -e "\n${YELLOW}Building IsuDeck binary via build-linux.sh...${NC}"
+chmod +x "$INSTALL_DIR/build-linux.sh"
+"$INSTALL_DIR/build-linux.sh"
 
 # Ensure executable permissions
 chmod +x "$INSTALL_DIR/IsuDeck-Linux-x64"

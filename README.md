@@ -152,6 +152,11 @@ After installation:
 - **Desktop Shortcut:** Search for **IsuDeck** in your applications menu.
 - **Directory:** All configuration, sounds, and plugins live in `~/IsuDeck`.
 
+To completely uninstall IsuDeck on Linux, run:
+```bash
+curl -fsSL https://raw.githubusercontent.com/muzmahil/IsuDeck/main/uninstall.sh | bash
+```
+
 
 ---
 
