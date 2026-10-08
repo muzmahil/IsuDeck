@@ -23,6 +23,8 @@ export default function SettingsPage() {
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [copiedCommand, setCopiedCommand] = useState(false);
+  const [lastCheckedTime, setLastCheckedTime] = useState(null);
+  const [checkFeedback, setCheckFeedback] = useState(null); // 'up_to_date' | 'new_available' | 'error'
 
   const [driverLoading, setDriverLoading] = useState(false);
   const [driverStatus, setDriverStatus] = useState('uninstalled'); // 'active' | 'reboot_required_uninstall' | 'reboot_required_install' | 'uninstalled'
@@ -75,14 +77,49 @@ export default function SettingsPage() {
 
   const handleManualCheckUpdate = async () => {
     setIsCheckingUpdate(true);
+    setCheckFeedback(null);
     try {
       const res = await checkForUpdates();
       setUpdateInfo(res);
+      const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setLastCheckedTime(now);
+
       if (res.updateAvailable) {
+        setCheckFeedback('new_available');
         setUpdateModalOpen(true);
+        setToast({
+          title: language === 'tr' ? 'Yeni Sürüm Mevcut!' : 'New Version Available!',
+          message: language === 'tr'
+            ? `IsuDeck ${res.latestVersion} sürümü yayınlandı.`
+            : `IsuDeck ${res.latestVersion} is now available.`,
+          variant: 'info'
+        });
+      } else if (res.success) {
+        setCheckFeedback('up_to_date');
+        setToast({
+          title: language === 'tr' ? 'IsuDeck Güncel' : 'IsuDeck is Up to Date',
+          message: language === 'tr'
+            ? `Harika! Zaten en son sürümü (${res.latestVersion || 'v' + currentVersion}) kullanıyorsunuz.`
+            : `Great! You are running the latest version (${res.latestVersion || 'v' + currentVersion}).`,
+          variant: 'success'
+        });
+        setTimeout(() => setCheckFeedback(null), 4000);
+      } else {
+        setCheckFeedback('error');
+        setToast({
+          title: language === 'tr' ? 'Güncelleme Denetlenemedi' : 'Update Check Failed',
+          message: res.error || (language === 'tr' ? 'İnternet bağlantınızı kontrol edin.' : 'Please check your internet connection.'),
+          variant: 'error'
+        });
       }
     } catch (e) {
       console.error('Update check failed:', e);
+      setCheckFeedback('error');
+      setToast({
+        title: language === 'tr' ? 'Hata Oluştu' : 'Error',
+        message: String(e),
+        variant: 'error'
+      });
     } finally {
       setIsCheckingUpdate(false);
     }
@@ -664,13 +701,20 @@ export default function SettingsPage() {
               <button
                 disabled={isCheckingUpdate}
                 onClick={handleManualCheckUpdate}
-                className="px-3.5 py-1.5 rounded-lg text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shadow-sm disabled:opacity-50"
-                style={{ backgroundColor: accentColor }}
+                className={`px-3.5 py-1.5 rounded-lg text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shadow-sm disabled:opacity-50 ${
+                  checkFeedback === 'up_to_date' ? 'bg-green-600 ring-2 ring-green-400/40' : ''
+                }`}
+                style={checkFeedback !== 'up_to_date' ? { backgroundColor: accentColor } : {}}
               >
                 {isCheckingUpdate ? (
                   <>
                     <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor"/></svg>
                     <span>{language === 'tr' ? 'Denetleniyor...' : 'Checking...'}</span>
+                  </>
+                ) : checkFeedback === 'up_to_date' ? (
+                  <>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-white"><polyline points="20 6 9 17 4 12"/></svg>
+                    <span>{language === 'tr' ? 'En Son Sürüm!' : 'Up to Date!'}</span>
                   </>
                 ) : (
                   <>
@@ -683,53 +727,70 @@ export default function SettingsPage() {
           </div>
 
           {/* Update Status Card */}
-          {updateInfo && (
-            <div className="pt-1">
-              {updateInfo.updateAvailable ? (
-                <div className="p-4 rounded-xl bg-gradient-to-r from-blue-950/40 via-indigo-950/30 to-purple-950/20 border border-blue-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-ping" />
-                      <span className="text-xs font-bold text-blue-300">
-                        {language === 'tr' ? `Yeni Sürüm Mevcut: ${updateInfo.latestVersion}` : `New Version Available: ${updateInfo.latestVersion}`}
-                      </span>
-                    </div>
-                    <p className="text-xs text-zinc-400 leading-relaxed">
-                      {language === 'tr'
-                        ? `${updateInfo.releaseName || 'Yeni bir sürüm yayınlandı'}. Yenilikleri inceleyip güncelleyebilirsiniz.`
-                        : `${updateInfo.releaseName || 'A new release is available'}. View release notes and update.`}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setUpdateModalOpen(true)}
-                    className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 shadow-md"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    <span>{language === 'tr' ? 'Güncellemeyi İncele' : 'View Update'}</span>
-                  </button>
-                </div>
-              ) : updateInfo.success ? (
-                <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-xl flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-2 h-2 rounded-full bg-green-400" />
-                    <span className="text-xs font-medium text-green-300">
-                      {language === 'tr' ? `IsuDeck güncel (v${currentVersion})` : `IsuDeck is up to date (v${currentVersion})`}
+          <div className="pt-1">
+            {updateInfo?.updateAvailable ? (
+              <div className="p-4 rounded-xl bg-gradient-to-r from-blue-950/40 via-indigo-950/30 to-purple-950/20 border border-blue-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-ping" />
+                    <span className="text-xs font-bold text-blue-300">
+                      {language === 'tr' ? `Yeni Sürüm Mevcut: ${updateInfo.latestVersion}` : `New Version Available: ${updateInfo.latestVersion}`}
                     </span>
                   </div>
-                  <span className="text-[11px] text-zinc-500 font-mono">
-                    {updateInfo.latestVersion || `v${currentVersion}`}
-                  </span>
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    {language === 'tr'
+                      ? `${updateInfo.releaseName || 'Yeni bir sürüm yayınlandı'}. Yenilikleri inceleyip güncelleyebilirsiniz.`
+                      : `${updateInfo.releaseName || 'A new release is available'}. View release notes and update.`}
+                  </p>
+                  {lastCheckedTime && (
+                    <span className="text-[10px] text-zinc-500 block pt-0.5">
+                      {language === 'tr' ? `Son kontrol: ${lastCheckedTime}` : `Last checked: ${lastCheckedTime}`}
+                    </span>
+                  )}
                 </div>
-              ) : (
-                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-2">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-red-400"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                  <span className="text-xs text-red-300">
-                    {language === 'tr' ? 'Güncelleme kontrolü başarısız:' : 'Update check failed:'} {updateInfo.error}
-                  </span>
+                <button
+                  onClick={() => setUpdateModalOpen(true)}
+                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 shadow-md"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  <span>{language === 'tr' ? 'Güncellemeyi İncele' : 'View Update'}</span>
+                </button>
+              </div>
+            ) : updateInfo?.success ? (
+              <div className="p-4 bg-green-500/10 border border-green-500/30 rounded-xl flex items-center justify-between gap-4 animate-in fade-in">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-green-500/20 border border-green-500/40 flex items-center justify-center text-green-400 shrink-0">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-green-300 block">
+                      {language === 'tr' ? `IsuDeck en son sürümde (v${currentVersion})` : `IsuDeck is up to date (v${currentVersion})`}
+                    </span>
+                    <span className="text-[11px] text-zinc-400">
+                      {lastCheckedTime 
+                        ? (language === 'tr' ? `Son kontrol: ${lastCheckedTime} • Yeni bir güncelleme bulunmuyor.` : `Last checked: ${lastCheckedTime} • No new updates available.`)
+                        : (language === 'tr' ? 'Harika! En güncel sürümü kullanıyorsunuz.' : 'Great! You are running the latest version.')}
+                    </span>
+                  </div>
                 </div>
-              )}
-            </div>
-          )}
+                <span className="text-xs text-green-400 font-mono font-bold px-2.5 py-1 rounded-md bg-green-500/15 border border-green-500/30 shrink-0">
+                  {updateInfo.latestVersion || `v${currentVersion}`}
+                </span>
+              </div>
+            ) : updateInfo?.error ? (
+              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-red-400 shrink-0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <span className="text-xs text-red-300">
+                  {language === 'tr' ? 'Güncelleme kontrolü başarısız:' : 'Update check failed:'} {updateInfo.error}
+                </span>
+              </div>
+            ) : (
+              <div className="p-3 bg-white/5 border border-white/5 rounded-xl flex items-center justify-between text-zinc-400 text-xs">
+                <span>{language === 'tr' ? 'Güncellemeleri denetlemek için yukarıdaki butona tıklayın.' : 'Click the button above to check for updates.'}</span>
+                <span className="text-zinc-500 font-mono">v{currentVersion}</span>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* 5. HAKKINDA & LİSANSLAR */}
