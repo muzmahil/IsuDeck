@@ -1,7 +1,7 @@
 import useStore from '../store/useStore';
 
 export default function Sidebar() {
-  const { activeTab, setActiveTab, connectionStatus, latency, t, language, restartApp, settings } = useStore();
+  const { activeTab, setActiveTab, connectionStatus, latency, t, language, restartApp, settings, updateInfo } = useStore();
   const accentColor = settings?.accentColor || '#3b82f6';
 
   const handleNavigation = (id) => {
@@ -108,6 +108,9 @@ export default function Sidebar() {
                 {item.icon}
               </span>
               <span className="hidden lg:block">{item.label}</span>
+              {item.id === 'settings' && updateInfo?.updateAvailable && (
+                <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse ml-auto" title={language === 'tr' ? 'Güncelleme mevcut' : 'Update available'} />
+              )}
             </button>
           ))}
         </nav>

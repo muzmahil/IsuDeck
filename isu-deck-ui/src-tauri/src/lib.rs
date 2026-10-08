@@ -595,6 +595,27 @@ async fn set_autostart(app: tauri::AppHandle, enable: bool) -> Result<bool, Stri
     auto.is_enabled().map_err(|e| e.to_string())
 }
 
+#[command]
+fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+#[command]
+fn get_platform() -> String {
+    #[cfg(windows)]
+    return "windows".to_string();
+    #[cfg(target_os = "linux")]
+    return "linux".to_string();
+    #[cfg(not(any(windows, target_os = "linux")))]
+    return "other".to_string();
+}
+
+#[command]
+fn open_external_url(url: String) -> Result<(), String> {
+    platform::PlatformActions::open_url(&url);
+    Ok(())
+}
+
 // ==========================================================
 // 6. ANA TAURI BAŞLATICI
 // ==========================================================
@@ -641,7 +662,10 @@ pub fn run() {
             set_window_always_on_top,
             update_tray_language,
             get_autostart_status,
-            set_autostart
+            set_autostart,
+            get_app_version,
+            get_platform,
+            open_external_url
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();

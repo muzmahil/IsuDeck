@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import useStore from '../../store/useStore';
+import { checkForUpdates, openExternalUrl, getAppVersion, getPlatform } from '../../utils/updater';
 
 export default function SettingsPage() {
   const { 
@@ -12,8 +13,16 @@ export default function SettingsPage() {
     latency, 
     customSounds, 
     setCustomSounds,
-    setToast 
+    setToast,
+    updateInfo,
+    setUpdateInfo
   } = useStore();
+
+  const [currentVersion, setCurrentVersion] = useState('1.1.0');
+  const [platform, setPlatform] = useState('windows');
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [updateModalOpen, setUpdateModalOpen] = useState(false);
+  const [copiedCommand, setCopiedCommand] = useState(false);
 
   const [driverLoading, setDriverLoading] = useState(false);
   const [driverStatus, setDriverStatus] = useState('uninstalled'); // 'active' | 'reboot_required_uninstall' | 'reboot_required_install' | 'uninstalled'
@@ -46,6 +55,8 @@ export default function SettingsPage() {
 
   useEffect(() => {
     checkDriver();
+    getAppVersion().then(v => setCurrentVersion(v));
+    getPlatform().then(p => setPlatform(p));
 
     const fetchSounds = async () => {
       try {
@@ -61,6 +72,21 @@ export default function SettingsPage() {
     };
     fetchSounds();
   }, [setCustomSounds]);
+
+  const handleManualCheckUpdate = async () => {
+    setIsCheckingUpdate(true);
+    try {
+      const res = await checkForUpdates();
+      setUpdateInfo(res);
+      if (res.updateAvailable) {
+        setUpdateModalOpen(true);
+      }
+    } catch (e) {
+      console.error('Update check failed:', e);
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
 
   const handleLanguageChange = (e) => {
     const newLang = e.target.value;
@@ -537,6 +563,25 @@ export default function SettingsPage() {
 
           <div className="h-px bg-white/5" />
 
+          {/* Açılışta Güncellemeleri Denetle */}
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <span className="text-xs font-medium text-white">{language === 'tr' ? 'Açılışta Güncellemeleri Denetle' : 'Check for Updates on Launch'}</span>
+              <p className="text-[11px] text-zinc-500">{language === 'tr' ? 'Uygulama başladığında yeni sürüm olup olmadığını otomatik kontrol et' : 'Automatically check for new releases when IsuDeck starts'}</p>
+            </div>
+            <button
+              onClick={() => handleToggle('autoCheckUpdates')}
+              className={`w-10 h-5 rounded-full relative transition-colors cursor-pointer shrink-0 ${
+                settings.autoCheckUpdates !== false ? 'bg-blue-600' : 'bg-zinc-800'
+              }`}
+              style={settings.autoCheckUpdates !== false ? { backgroundColor: accentColor } : {}}
+            >
+              <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${settings.autoCheckUpdates !== false ? 'right-0.5' : 'left-0.5'}`} />
+            </button>
+          </div>
+
+          <div className="h-px bg-white/5" />
+
           {/* Varsayılan Başlık Göster */}
           <div className="flex items-center justify-between gap-4">
             <div>
@@ -598,7 +643,96 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* 4. HAKKINDA & LİSANSLAR */}
+        {/* 4. GÜNCELLEMELER */}
+        <div className="bg-[#181818] border border-white/5 rounded-xl p-5 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-white">
+                  {language === 'tr' ? 'Güncellemeler' : 'Updates'}
+                </h2>
+                <span className="text-[11px] text-zinc-400 font-medium bg-white/5 px-2 py-0.5 rounded border border-white/5 font-mono">
+                  v{currentVersion}
+                </span>
+              </div>
+              <p className="text-xs text-zinc-500 mt-0.5">
+                {language === 'tr' ? 'Yazılım sürümü ve GitHub yayınları' : 'Application version and GitHub releases'}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                disabled={isCheckingUpdate}
+                onClick={handleManualCheckUpdate}
+                className="px-3.5 py-1.5 rounded-lg text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shadow-sm disabled:opacity-50"
+                style={{ backgroundColor: accentColor }}
+              >
+                {isCheckingUpdate ? (
+                  <>
+                    <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor"/></svg>
+                    <span>{language === 'tr' ? 'Denetleniyor...' : 'Checking...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                    <span>{language === 'tr' ? 'Güncellemeleri Denetle' : 'Check for Updates'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Update Status Card */}
+          {updateInfo && (
+            <div className="pt-1">
+              {updateInfo.updateAvailable ? (
+                <div className="p-4 rounded-xl bg-gradient-to-r from-blue-950/40 via-indigo-950/30 to-purple-950/20 border border-blue-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-ping" />
+                      <span className="text-xs font-bold text-blue-300">
+                        {language === 'tr' ? `Yeni Sürüm Mevcut: ${updateInfo.latestVersion}` : `New Version Available: ${updateInfo.latestVersion}`}
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-400 leading-relaxed">
+                      {language === 'tr'
+                        ? `${updateInfo.releaseName || 'Yeni bir sürüm yayınlandı'}. Yenilikleri inceleyip güncelleyebilirsiniz.`
+                        : `${updateInfo.releaseName || 'A new release is available'}. View release notes and update.`}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setUpdateModalOpen(true)}
+                    className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 shadow-md"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    <span>{language === 'tr' ? 'Güncellemeyi İncele' : 'View Update'}</span>
+                  </button>
+                </div>
+              ) : updateInfo.success ? (
+                <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-xl flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-2 h-2 rounded-full bg-green-400" />
+                    <span className="text-xs font-medium text-green-300">
+                      {language === 'tr' ? `IsuDeck güncel (v${currentVersion})` : `IsuDeck is up to date (v${currentVersion})`}
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-zinc-500 font-mono">
+                    {updateInfo.latestVersion || `v${currentVersion}`}
+                  </span>
+                </div>
+              ) : (
+                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-2">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-red-400"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  <span className="text-xs text-red-300">
+                    {language === 'tr' ? 'Güncelleme kontrolü başarısız:' : 'Update check failed:'} {updateInfo.error}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 5. HAKKINDA & LİSANSLAR */}
         <div className="bg-[#181818] border border-white/5 rounded-xl p-5 space-y-4">
           <div className="flex items-center justify-between border-b border-white/5 pb-3">
             <div>
@@ -610,8 +744,8 @@ export default function SettingsPage() {
                   IsuDeck by rootcf
                 </span>
               </div>
-              <p className="text-xs text-zinc-500 mt-0.5">
-                IsuDeck Core v1.0.0
+              <p className="text-xs text-zinc-500 mt-0.5 font-mono">
+                IsuDeck Core v{currentVersion}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -788,7 +922,7 @@ export default function SettingsPage() {
                 <h4 className="font-bold text-zinc-200 mb-1">Third-Party & Included Components</h4>
                 <ul className="list-disc pl-4 space-y-1">
                   <li><strong>Tauri Framework:</strong> Licensed under MIT / Apache-2.0.</li>
-                  <li><strong>Next.js & React:</strong> Licensed under MIT License.</li>
+                  <li><strong>Vite & React:</strong> Licensed under MIT License.</li>
                   <li><strong>Lucide Icons:</strong> Licensed under MIT License (Lucide Contributors).</li>
                   <li><strong>Interception Library & Driver:</strong> Licensed under MIT License by Francisco Lopes.</li>
                   <li><strong>OBS WebSocket Plugin:</strong> Licensed under MIT License.</li>
@@ -803,6 +937,117 @@ export default function SettingsPage() {
               >
                 {language === 'tr' ? 'Anladım' : 'Close'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GÜNCELLEME DETAY MODALI */}
+      {updateModalOpen && updateInfo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-[#181818] border border-white/10 rounded-2xl w-full max-w-xl max-h-[85vh] flex flex-col shadow-2xl relative">
+            <div className="p-5 border-b border-white/10 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <span>{language === 'tr' ? 'IsuDeck Güncellemesi' : 'IsuDeck Update'}</span>
+                  <span className="px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-mono font-bold">
+                    {updateInfo.latestVersion}
+                  </span>
+                </h3>
+                <p className="text-xs text-zinc-400 mt-1">
+                  {updateInfo.releaseName} • {language === 'tr' ? 'Mevcut sürüm:' : 'Current version:'} v{currentVersion}
+                </p>
+              </div>
+              <button
+                onClick={() => setUpdateModalOpen(false)}
+                className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                title={language === 'tr' ? 'Kapat' : 'Close'}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-4">
+              {/* PLATFORM YÖNERGELERİ */}
+              {platform === 'linux' ? (
+                <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl space-y-2.5">
+                  <div className="flex items-center gap-2 text-amber-300 text-xs font-bold">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                    <span>{language === 'tr' ? 'Linux Güncelleme Yönergesi' : 'Linux Update Instructions'}</span>
+                  </div>
+                  <p className="text-xs text-zinc-300 leading-relaxed">
+                    {language === 'tr'
+                      ? 'Linux sisteminizde IsuDeck\'i en güncel sürüme yükseltmek için terminalinizde şu komutu çalıştırmanız yeterlidir:'
+                      : 'To update IsuDeck to the latest version on Linux, simply run this command in your terminal:'}
+                  </p>
+                  <div className="flex items-center justify-between bg-black/60 p-2.5 rounded-lg border border-white/10 font-mono text-xs text-green-400">
+                    <span>isudeck update</span>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText('isudeck update');
+                        setCopiedCommand(true);
+                        setTimeout(() => setCopiedCommand(false), 2000);
+                      }}
+                      className="px-2.5 py-1 rounded bg-white/10 hover:bg-white/20 text-white text-[11px] font-sans font-medium transition-colors cursor-pointer"
+                    >
+                      {copiedCommand ? (language === 'tr' ? 'Kopyalandı!' : 'Copied!') : (language === 'tr' ? 'Kopyala' : 'Copy')}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl space-y-2">
+                  <div className="flex items-center gap-2 text-blue-300 text-xs font-bold">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    <span>{language === 'tr' ? 'Windows Güncelleme' : 'Windows Update'}</span>
+                  </div>
+                  <p className="text-xs text-zinc-300 leading-relaxed">
+                    {language === 'tr'
+                      ? 'Yeni IsuDeck.exe dosyasını doğrudan indirebilir veya GitHub Releases sayfasından edinebilirsiniz.'
+                      : 'You can download the new IsuDeck.exe directly or visit the GitHub Releases page.'}
+                  </p>
+                </div>
+              )}
+
+              {/* SÜRÜM NOTLARI */}
+              {updateInfo.releaseNotes && (
+                <div className="space-y-1.5">
+                  <span className="text-xs font-bold text-white">
+                    {language === 'tr' ? 'Sürüm Notları (Release Notes):' : 'Release Notes:'}
+                  </span>
+                  <div className="p-3.5 bg-[#121212] rounded-xl border border-white/5 font-mono text-[11px] text-zinc-300 leading-relaxed max-h-48 overflow-y-auto whitespace-pre-wrap select-text">
+                    {updateInfo.releaseNotes}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-white/10 flex items-center justify-between gap-3">
+              <button
+                onClick={() => openExternalUrl(updateInfo.htmlUrl)}
+                className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white text-xs font-medium border border-white/10 transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                <span>{language === 'tr' ? 'GitHub\'da Görüntüle' : 'View on GitHub'}</span>
+              </button>
+
+              <div className="flex items-center gap-2">
+                {platform !== 'linux' && (
+                  <button
+                    onClick={() => openExternalUrl(updateInfo.downloadUrl)}
+                    className="px-5 py-2 rounded-lg text-white font-bold text-xs transition-colors cursor-pointer flex items-center gap-2 shadow-lg shadow-blue-600/20"
+                    style={{ backgroundColor: accentColor }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    <span>{language === 'tr' ? 'İndir (IsuDeck.exe)' : 'Download (IsuDeck.exe)'}</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setUpdateModalOpen(false)}
+                  className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-white font-medium text-xs transition-colors cursor-pointer"
+                >
+                  {language === 'tr' ? 'Kapat' : 'Close'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

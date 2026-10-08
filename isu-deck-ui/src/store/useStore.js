@@ -22,6 +22,10 @@ const useStore = create((set, get) => ({
   driverStatus: 'active',
   lastHandledMsgId: null,
   markMessageHandled: (msgId) => set({ lastHandledMsgId: msgId }),
+  updateInfo: null,
+  isCheckingUpdate: false,
+  setUpdateInfo: (info) => set({ updateInfo: info }),
+  setIsCheckingUpdate: (bool) => set({ isCheckingUpdate: bool }),
   settings: {
     theme: 'dark', // midnight, dark, light
     accentColor: '#3b82f6',
@@ -30,6 +34,7 @@ const useStore = create((set, get) => ({
     deckBacklight: true,
     minimizeToTray: false,
     autoStart: false,
+    autoCheckUpdates: true,
     defaultSoundFeedback: true,
     defaultShowTitle: true,
     defaultGridSize: 15,
