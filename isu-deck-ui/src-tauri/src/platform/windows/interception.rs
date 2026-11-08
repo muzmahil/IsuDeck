@@ -30,12 +30,24 @@ pub struct InterceptionLib {
     _lib: Library,
     pub create_context: Symbol<'static, extern "C" fn() -> InterceptionContext>,
     pub destroy_context: Symbol<'static, extern "C" fn(InterceptionContext)>,
-    pub set_filter: Symbol<'static, extern "C" fn(InterceptionContext, InterceptionPredicate, InterceptionFilter)>,
+    pub set_filter: Symbol<
+        'static,
+        extern "C" fn(InterceptionContext, InterceptionPredicate, InterceptionFilter),
+    >,
     pub is_keyboard: Symbol<'static, extern "C" fn(InterceptionDevice) -> i32>,
     pub wait: Symbol<'static, extern "C" fn(InterceptionContext) -> InterceptionDevice>,
-    pub receive: Symbol<'static, extern "C" fn(InterceptionContext, InterceptionDevice, *mut KeyStroke, u32) -> i32>,
-    pub send: Symbol<'static, extern "C" fn(InterceptionContext, InterceptionDevice, *const KeyStroke, u32) -> i32>,
-    pub get_hardware_id: Symbol<'static, extern "C" fn(InterceptionContext, InterceptionDevice, *mut u16, u32) -> u32>,
+    pub receive: Symbol<
+        'static,
+        extern "C" fn(InterceptionContext, InterceptionDevice, *mut KeyStroke, u32) -> i32,
+    >,
+    pub send: Symbol<
+        'static,
+        extern "C" fn(InterceptionContext, InterceptionDevice, *const KeyStroke, u32) -> i32,
+    >,
+    pub get_hardware_id: Symbol<
+        'static,
+        extern "C" fn(InterceptionContext, InterceptionDevice, *mut u16, u32) -> u32,
+    >,
 }
 
 unsafe impl Send for InterceptionLib {}
@@ -46,22 +58,40 @@ impl InterceptionLib {
         let lib = unsafe { Library::new(path.as_ref()) }.map_err(|e| e.to_string())?;
 
         unsafe {
-            let create_context: Symbol<extern "C" fn() -> InterceptionContext> =
-                lib.get(b"interception_create_context").map_err(|e| e.to_string())?;
-            let destroy_context: Symbol<extern "C" fn(InterceptionContext)> =
-                lib.get(b"interception_destroy_context").map_err(|e| e.to_string())?;
-            let set_filter: Symbol<extern "C" fn(InterceptionContext, InterceptionPredicate, InterceptionFilter)> =
-                lib.get(b"interception_set_filter").map_err(|e| e.to_string())?;
-            let is_keyboard: Symbol<extern "C" fn(InterceptionDevice) -> i32> =
-                lib.get(b"interception_is_keyboard").map_err(|e| e.to_string())?;
+            let create_context: Symbol<extern "C" fn() -> InterceptionContext> = lib
+                .get(b"interception_create_context")
+                .map_err(|e| e.to_string())?;
+            let destroy_context: Symbol<extern "C" fn(InterceptionContext)> = lib
+                .get(b"interception_destroy_context")
+                .map_err(|e| e.to_string())?;
+            let set_filter: Symbol<
+                extern "C" fn(InterceptionContext, InterceptionPredicate, InterceptionFilter),
+            > = lib
+                .get(b"interception_set_filter")
+                .map_err(|e| e.to_string())?;
+            let is_keyboard: Symbol<extern "C" fn(InterceptionDevice) -> i32> = lib
+                .get(b"interception_is_keyboard")
+                .map_err(|e| e.to_string())?;
             let wait: Symbol<extern "C" fn(InterceptionContext) -> InterceptionDevice> =
                 lib.get(b"interception_wait").map_err(|e| e.to_string())?;
-            let receive: Symbol<extern "C" fn(InterceptionContext, InterceptionDevice, *mut KeyStroke, u32) -> i32> =
-                lib.get(b"interception_receive").map_err(|e| e.to_string())?;
-            let send: Symbol<extern "C" fn(InterceptionContext, InterceptionDevice, *const KeyStroke, u32) -> i32> =
-                lib.get(b"interception_send").map_err(|e| e.to_string())?;
-            let get_hardware_id: Symbol<extern "C" fn(InterceptionContext, InterceptionDevice, *mut u16, u32) -> u32> =
-                lib.get(b"interception_get_hardware_id").map_err(|e| e.to_string())?;
+            let receive: Symbol<
+                extern "C" fn(InterceptionContext, InterceptionDevice, *mut KeyStroke, u32) -> i32,
+            > = lib
+                .get(b"interception_receive")
+                .map_err(|e| e.to_string())?;
+            let send: Symbol<
+                extern "C" fn(
+                    InterceptionContext,
+                    InterceptionDevice,
+                    *const KeyStroke,
+                    u32,
+                ) -> i32,
+            > = lib.get(b"interception_send").map_err(|e| e.to_string())?;
+            let get_hardware_id: Symbol<
+                extern "C" fn(InterceptionContext, InterceptionDevice, *mut u16, u32) -> u32,
+            > = lib
+                .get(b"interception_get_hardware_id")
+                .map_err(|e| e.to_string())?;
 
             Ok(Arc::new(Self {
                 create_context: std::mem::transmute(create_context),
@@ -77,10 +107,19 @@ impl InterceptionLib {
         }
     }
 
-    pub fn get_device_hid(&self, context: InterceptionContext, device: InterceptionDevice) -> String {
+    pub fn get_device_hid(
+        &self,
+        context: InterceptionContext,
+        device: InterceptionDevice,
+    ) -> String {
         let mut buffer = [0u16; 512];
-        let bytes_written = (self.get_hardware_id)(context, device, buffer.as_mut_ptr(), (buffer.len() * 2) as u32);
-        
+        let bytes_written = (self.get_hardware_id)(
+            context,
+            device,
+            buffer.as_mut_ptr(),
+            (buffer.len() * 2) as u32,
+        );
+
         if bytes_written == 0 {
             return "UNKNOWN_DEVICE".to_string();
         }
@@ -105,37 +144,21 @@ impl InterceptionLib {
     }
 }
 
-pub fn find_interception_dll(app: &tauri::AppHandle) -> Option<PathBuf> {
-    use tauri::Manager;
-
-    // 1. Exe dizini veya altındaki engine klasörü
+pub fn find_interception_dll() -> Option<PathBuf> {
+    // 1. Exe dizini
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            let p1 = exe_dir.join("interception.dll");
-            if p1.exists() { return Some(p1); }
-            let p2 = exe_dir.join("engine").join("interception.dll");
-            if p2.exists() { return Some(p2); }
+            let dll_path = exe_dir.join("interception.dll");
+            if dll_path.exists() {
+                return Some(dll_path);
+            }
         }
     }
 
-    // 2. Tauri Resource dizini
-    if let Ok(resource) = app.path().resolve("engine/interception.dll", tauri::path::BaseDirectory::Resource) {
-        if resource.exists() {
-            return Some(resource);
-        }
-    }
-
-    // 3. Çalışma dizini yolları
-    let paths = [
-        PathBuf::from("engine/interception.dll"),
-        PathBuf::from("interception.dll"),
-        PathBuf::from("src-tauri/engine/interception.dll"),
-        PathBuf::from("../src-tauri/engine/interception.dll"),
-    ];
-    for p in &paths {
-        if p.exists() {
-            return Some(p.clone());
-        }
+    // 2. Çalışma dizini
+    let dll_path = PathBuf::from("interception.dll");
+    if dll_path.exists() {
+        return Some(dll_path);
     }
     None
 }
@@ -145,7 +168,7 @@ pub fn start_windows_interception_thread(
     block_list: Arc<Mutex<HashSet<(String, u16)>>>,
     blocked_keys_pressed: Arc<Mutex<HashSet<(i32, u16)>>>,
 ) {
-    let dll_path = match find_interception_dll(&app_handle) {
+    let dll_path = match find_interception_dll() {
         Some(p) => p,
         None => {
             eprintln!("[RUST ENGINE] interception.dll not found.");
@@ -229,6 +252,15 @@ pub fn start_windows_interception_thread(
                 if !was_blocked {
                     (lib.send)(context, device, &stroke, 1);
                 }
+
+                let payload = serde_json::json!({
+                    "type": "inputReleased",
+                    "hid": hid,
+                    "handler": device,
+                    "key": key_code,
+                    "blocked": was_blocked
+                });
+                let _ = app_handle.emit("INPUT_EVENT", &payload);
             }
         }
 

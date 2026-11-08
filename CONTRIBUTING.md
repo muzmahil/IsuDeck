@@ -40,7 +40,7 @@ npm run tauri dev
 
 ## 🔌 Developing Plugins
 
-If you want to contribute a plugin, refer to the [PLUGIN_SDK.md](./PLUGIN_SDK.md) documentation. You can develop plugins in any language using our JSON-RPC stdio protocol.
+If you want to contribute a plugin, refer to the [PLUGIN_SDK.md](./PLUGIN_SDK.md) documentation. You can develop plugins in any language using IsuDeck's line-delimited JSON stdio protocol.
 
 ---
 

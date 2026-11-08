@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "IsuDeck",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "identifier": "IsuDeck",
   "build": {
     "frontendDist": "../dist",
@@ -18,7 +18,9 @@
         "resizable": true,
         "fullscreen": false,
         "decorations": false,
-        "center": true
+        "center": true,
+        "backgroundColor": "#121212",
+        "theme": "Dark"
       }
     ],
     "security": {
@@ -26,26 +28,13 @@
     }
   },
   "bundle": {
-    "active": true,
-    "targets": "all",
+    "active": false,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "resources": [
-      "engine/*",
-      "drivers/*"
-    ],
-    "windows": {
-    "nsis": {
-      "installMode": "perMachine",
-      "installerIcon": "icons/icon.ico",
-      "headerImage": "icons/32x32.png",
-      "languages": ["Turkish", "English"]
-    }
-    }
+    ]
   }
 }

@@ -5,8 +5,56 @@
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>IsuDeck</title>
+    <!--
+      The webview paints its own default (white) surface until the CSS bundle
+      and React have rendered. Persist the active theme and paint the matching
+      background here so startup never flashes white.
+    -->
+    <script>
+      (function () {
+        var THEME_BACKGROUNDS = {
+          midnight: '#0b0f17',
+          dark: '#121212',
+          light: '#f8fafc'
+        };
+        var DEFAULT_THEME = 'dark';
+        var theme = DEFAULT_THEME;
+        try {
+          var stored = window.localStorage.getItem('isu_theme');
+          if (stored && THEME_BACKGROUNDS[stored]) theme = stored;
+        } catch (error) {
+          /* storage is unavailable; keep the default theme */
+        }
+        var background = THEME_BACKGROUNDS[theme];
+        var root = document.documentElement;
+        root.setAttribute('data-theme', theme);
+        root.style.setProperty('--boot-bg', background);
+        root.style.backgroundColor = background;
+        root.style.colorScheme = theme === 'light' ? 'light' : 'dark';
+      })();
+    </script>
+    <style>
+      html,
+      body,
+      #root {
+        background-color: var(--boot-bg, #121212);
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        color: #ffffff;
+        overflow: hidden;
+      }
+      #root {
+        height: 100%;
+        width: 100%;
+      }
+    </style>
   </head>
-  <body class="font-sans antialiased bg-[#1a1a1a] text-white h-screen w-screen overflow-hidden select-none flex flex-col">
+  <body class="font-sans antialiased text-white h-screen w-screen overflow-hidden select-none flex flex-col">
     <div id="root" class="h-full w-full flex flex-col"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

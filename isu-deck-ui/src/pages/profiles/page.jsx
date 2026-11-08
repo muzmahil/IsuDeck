@@ -5,12 +5,27 @@ import useStore from '../../store/useStore';
 import { fileSystem } from '../../utils/fileSystem';
 
 export default function ProfilesPage() {
-  const { t, language, sendToEngine, settings, saveProfiles: storeSaveProfiles } = useStore();
+  const {
+    t,
+    language,
+    sendToEngine,
+    settings,
+    profiles: cachedProfiles,
+    setProfiles: setStoredProfiles,
+    saveProfiles: storeSaveProfiles,
+    persistLoadedProfiles
+  } = useStore();
   const accentColor = settings?.accentColor || '#3b82f6';
   const [profiles, setProfiles] = useState([]);
   const [editModal, setEditModal] = useState({ show: false, id: null, name: '', icon: '📁' });
   const [modal, setModal] = useState({ show: false, type: 'alert', title: '', message: '', onConfirm: () => {} });
   const [draggedIndex, setDraggedIndex] = useState(null);
+
+  useEffect(() => {
+    if (cachedProfiles.length > 0) {
+      setProfiles(cachedProfiles);
+    }
+  }, [cachedProfiles]);
 
   useEffect(() => {
     const loadProfiles = async () => {
@@ -21,10 +36,10 @@ export default function ProfilesPage() {
                 // Eğer hiç aktif profil yoksa ilkini aktif yap (Migration)
                 if (loadedProfiles.length > 0 && !loadedProfiles.some(p => p.isActive)) {
                     loadedProfiles[0].isActive = true;
-                    await fileSystem.writeFile('profiles.json', loadedProfiles);
+                    await persistLoadedProfiles(loadedProfiles);
                 }
                 setProfiles(loadedProfiles);
-                if (storeSaveProfiles) storeSaveProfiles(loadedProfiles);
+                setStoredProfiles(loadedProfiles);
             } else {
                 const initialGrid = settings?.defaultGridSize || 15;
                 const defaultProfile = {
@@ -35,9 +50,8 @@ export default function ProfilesPage() {
                     buttons: Array(initialGrid).fill(null),
                     isActive: true
                 };
-                await fileSystem.writeFile('profiles.json', [defaultProfile]);
+                await persistLoadedProfiles([defaultProfile]);
                 setProfiles([defaultProfile]);
-                if (storeSaveProfiles) storeSaveProfiles([defaultProfile]);
             }
         } catch (e) {
             console.error("Profiles Load Error:", e);
@@ -46,10 +60,14 @@ export default function ProfilesPage() {
     loadProfiles();
   }, []);
 
-  const saveProfiles = (newProfiles) => {
+  const saveProfiles = async (newProfiles) => {
+    if (storeSaveProfiles) {
+      await storeSaveProfiles(newProfiles);
+    } else {
+      await fileSystem.writeFile('profiles.json', newProfiles);
+      setStoredProfiles(newProfiles);
+    }
     setProfiles(newProfiles);
-    fileSystem.writeFile('profiles.json', newProfiles);
-    if (storeSaveProfiles) storeSaveProfiles(newProfiles);
   };
 
   const createProfile = () => {
@@ -62,7 +80,9 @@ export default function ProfilesPage() {
       buttons: Array(defaultGrid).fill(null),
       isActive: false
     };
-    saveProfiles([...profiles, newProfile]);
+    saveProfiles([...profiles, newProfile]).catch(error => {
+      console.error('Create profile save error:', error);
+    });
   };
 
   const deleteProfile = (e, index) => {
@@ -83,7 +103,7 @@ export default function ProfilesPage() {
         type: 'confirm',
         title: t('profiles.delete_confirm_title', language),
         message: t('profiles.delete_confirm_msg', language),
-        onConfirm: () => {
+        onConfirm: async () => {
             const deletedProfile = profiles[index];
             const newProfiles = profiles.filter((_, i) => i !== index);
             
@@ -92,7 +112,13 @@ export default function ProfilesPage() {
                 newProfiles[0].isActive = true;
             }
             
-            saveProfiles(newProfiles);
+            try {
+              await saveProfiles(newProfiles);
+            } catch (error) {
+              console.error('Delete profile save error:', error);
+              setModal(prev => ({ ...prev, show: false }));
+              return;
+            }
 
             // Aktif profil değişmiş olabileceği için backend'i güncelle
             const activeProfile = newProfiles.find(p => p.isActive) || newProfiles[0];
@@ -112,12 +138,17 @@ export default function ProfilesPage() {
     });
   };
 
-  const activateProfile = (index) => {
+  const activateProfile = async (index) => {
     const newProfiles = profiles.map((p, i) => ({
         ...p,
         isActive: i === index
     }));
-    saveProfiles(newProfiles);
+    try {
+      await saveProfiles(newProfiles);
+    } catch (error) {
+      console.error('Activate profile save error:', error);
+      return;
+    }
 
     // Backend'e yeni profilin tuşlarını bildir
     const selected = newProfiles[index];
@@ -142,7 +173,9 @@ export default function ProfilesPage() {
         name: `${profile.name} (Kopya)`,
         isActive: false
     };
-    saveProfiles([...profiles, newProfile]);
+    saveProfiles([...profiles, newProfile]).catch(error => {
+      console.error('Duplicate profile save error:', error);
+    });
   };
 
   const startEditing = (e, profile) => {
@@ -160,7 +193,9 @@ export default function ProfilesPage() {
       const newProfiles = profiles.map(p => 
           p.id === editModal.id ? { ...p, name: editModal.name, icon: editModal.icon } : p
       );
-      saveProfiles(newProfiles);
+      saveProfiles(newProfiles).catch(error => {
+        console.error('Save profile details error:', error);
+      });
       setEditModal(prev => ({ ...prev, show: false }));
   };
 
@@ -182,7 +217,9 @@ export default function ProfilesPage() {
     const [draggedItem] = newProfiles.splice(draggedIndex, 1);
     newProfiles.splice(index, 0, draggedItem);
     
-    saveProfiles(newProfiles);
+    saveProfiles(newProfiles).catch(error => {
+      console.error('Reorder profiles save error:', error);
+    });
     setDraggedIndex(null);
   };
 

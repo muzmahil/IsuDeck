@@ -1,8 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod platform;
 mod action_runner;
+mod platform;
 mod plugin_manager;
+mod plugin_store;
 
 use std::collections::HashSet;
 use std::fs;
@@ -81,9 +82,19 @@ fn bootstrap_portable_environment(app: &tauri::AppHandle) {
     {
         // 1. Windows: extract interception.dll if missing
         let dll_path = root.join("interception.dll");
-        if !dll_path.exists() {
-            let _ = fs::write(&dll_path, platform::windows::bootstrap::EMBEDDED_INTERCEPTION_DLL);
-            println!("[BOOTSTRAP] Extracted interception.dll.");
+        let embedded_dll = platform::windows::bootstrap::EMBEDDED_INTERCEPTION_DLL;
+        let dll_is_current = fs::read(&dll_path)
+            .map(|contents| contents == embedded_dll)
+            .unwrap_or(false);
+        if !dll_is_current {
+            match fs::write(&dll_path, embedded_dll) {
+                Ok(()) => println!("[BOOTSTRAP] Extracted embedded interception.dll."),
+                Err(error) => eprintln!(
+                    "[BOOTSTRAP] Failed to extract embedded interception.dll to {}: {}",
+                    dll_path.display(),
+                    error
+                ),
+            }
         }
 
         // 2. Windows: extract drivers/install-interception.exe and install_helper.cmd if missing
@@ -91,11 +102,17 @@ fn bootstrap_portable_environment(app: &tauri::AppHandle) {
         let _ = fs::create_dir_all(&drivers_dir);
         let installer_path = drivers_dir.join("install-interception.exe");
         if !installer_path.exists() {
-            let _ = fs::write(&installer_path, platform::windows::bootstrap::EMBEDDED_INSTALLER);
+            let _ = fs::write(
+                &installer_path,
+                platform::windows::bootstrap::EMBEDDED_INSTALLER,
+            );
             println!("[BOOTSTRAP] Extracted drivers/install-interception.exe.");
         }
         let helper_path = drivers_dir.join("install_helper.cmd");
-        let _ = fs::write(&helper_path, platform::windows::bootstrap::INSTALL_HELPER_CMD);
+        let _ = fs::write(
+            &helper_path,
+            platform::windows::bootstrap::INSTALL_HELPER_CMD,
+        );
     }
 
     // 3. sounds/ directory and default sounds
@@ -130,7 +147,10 @@ fn bootstrap_portable_environment(app: &tauri::AppHandle) {
                 "buttons": vec![serde_json::Value::Null; 15]
             }
         ]);
-        let _ = fs::write(&profiles_path, serde_json::to_string_pretty(&default_profiles).unwrap());
+        let _ = fs::write(
+            &profiles_path,
+            serde_json::to_string_pretty(&default_profiles).unwrap(),
+        );
         println!("[BOOTSTRAP] Created default profiles.json.");
     }
 
@@ -148,8 +168,14 @@ fn bootstrap_portable_environment(app: &tauri::AppHandle) {
             "language": default_lang,
             "disclaimerAccepted": false
         });
-        let _ = fs::write(&settings_path, serde_json::to_string_pretty(&default_settings).unwrap());
-        println!("[BOOTSTRAP] Created default settings.json (Language: {}).", default_lang);
+        let _ = fs::write(
+            &settings_path,
+            serde_json::to_string_pretty(&default_settings).unwrap(),
+        );
+        println!(
+            "[BOOTSTRAP] Created default settings.json (Language: {}).",
+            default_lang
+        );
     }
 }
 
@@ -207,7 +233,7 @@ fn open_sounds_dir(app: tauri::AppHandle) -> Result<(), String> {
     let root = isudeck_root(&app)?;
     let sounds_dir = root.join("sounds");
     fs::create_dir_all(&sounds_dir).map_err(|e| e.to_string())?;
-    
+
     #[cfg(windows)]
     {
         std::process::Command::new("explorer")
@@ -302,25 +328,26 @@ async fn manage_driver(app: tauri::AppHandle, action: String) -> Result<String, 
 }
 
 #[command]
-fn check_driver_status(app: tauri::AppHandle) -> String {
+fn check_driver_status() -> String {
     #[cfg(windows)]
     {
         let reg_has = platform::windows::bootstrap::check_registry_has_interception();
-        let mem_has = if let Some(dll_path) = platform::windows::interception::find_interception_dll(&app) {
-            if let Ok(lib) = platform::windows::interception::InterceptionLib::load(&dll_path) {
-                let ctx = (lib.create_context)();
-                if !ctx.is_null() {
-                    (lib.destroy_context)(ctx);
-                    true
+        let mem_has =
+            if let Some(dll_path) = platform::windows::interception::find_interception_dll() {
+                if let Ok(lib) = platform::windows::interception::InterceptionLib::load(&dll_path) {
+                    let ctx = (lib.create_context)();
+                    if !ctx.is_null() {
+                        (lib.destroy_context)(ctx);
+                        true
+                    } else {
+                        false
+                    }
                 } else {
                     false
                 }
             } else {
                 false
-            }
-        } else {
-            false
-        };
+            };
 
         if reg_has && mem_has {
             "active".to_string()
@@ -339,8 +366,8 @@ fn check_driver_status(app: tauri::AppHandle) -> String {
 }
 
 #[command]
-fn check_driver_installed(app: tauri::AppHandle) -> bool {
-    let status = check_driver_status(app);
+fn check_driver_installed() -> bool {
+    let status = check_driver_status();
     status == "active"
 }
 
@@ -349,7 +376,13 @@ fn restart_system() -> Result<(), String> {
     #[cfg(windows)]
     {
         let _ = std::process::Command::new("shutdown")
-            .args(["/r", "/t", "2", "/c", "IsuDeck surucu degisikligi icin bilgisayar yeniden baslatiliyor."])
+            .args([
+                "/r",
+                "/t",
+                "2",
+                "/c",
+                "IsuDeck surucu degisikligi icin bilgisayar yeniden baslatiliyor.",
+            ])
             .spawn();
     }
     #[cfg(not(windows))]
@@ -380,15 +413,23 @@ async fn send_action(
 
     match msg_type {
         "ping" => {
-            let _ = app.emit("INPUT_EVENT", serde_json::json!({ "type": "pong" }).to_string());
+            let _ = app.emit(
+                "INPUT_EVENT",
+                serde_json::json!({ "type": "pong" }).to_string(),
+            );
         }
         "init_block_list" => {
             if let Some(blocks) = parsed.get("blocks").and_then(|v| v.as_array()) {
                 let mut new_set = HashSet::new();
                 for b in blocks {
-                    let hid = b.get("hid").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let hid = b
+                        .get("hid")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     let key = b.get("key").and_then(|v| {
-                        v.as_u64().map(|n| n as u16)
+                        v.as_u64()
+                            .map(|n| n as u16)
                             .or_else(|| v.as_str().and_then(|s| s.parse::<u16>().ok()))
                     });
                     if key.is_some() {
@@ -408,7 +449,8 @@ async fn send_action(
             }
         }
         "SET_SYSTEM_VOLUME" => {
-            let percent = parsed.get("percent")
+            let percent = parsed
+                .get("percent")
                 .and_then(|v| v.as_f64().or_else(|| v.as_str()?.parse().ok()))
                 .unwrap_or(50.0);
             crate::platform::PlatformActions::set_system_master_volume(percent);
@@ -418,10 +460,18 @@ async fn send_action(
                 if let Some(actions) = action_data_obj.get("actions").and_then(|v| v.as_array()) {
                     for act in actions {
                         let raw_type = act.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                        let def_id = act.get("definitionId").and_then(|v| v.as_str()).unwrap_or("");
+                        let def_id = act
+                            .get("definitionId")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
 
-                        if matches!(raw_type, "SET_VARIABLE" | "CHANGE_VARIABLE" | "IF_CONDITION" | "LOOP_REPEAT")
-                            || matches!(def_id, "SET_VARIABLE" | "CHANGE_VARIABLE" | "IF_CONDITION" | "LOOP_REPEAT") {
+                        if matches!(
+                            raw_type,
+                            "SET_VARIABLE" | "CHANGE_VARIABLE" | "IF_CONDITION" | "LOOP_REPEAT"
+                        ) || matches!(
+                            def_id,
+                            "SET_VARIABLE" | "CHANGE_VARIABLE" | "IF_CONDITION" | "LOOP_REPEAT"
+                        ) {
                             continue;
                         }
 
@@ -487,16 +537,79 @@ async fn send_action(
                         );
 
                         if is_core {
-                            println!("[RUST ENGINE] Executing core action: '{}' / '{}'", raw_type, def_id);
+                            let phase = act
+                                .get("phase")
+                                .and_then(|v| v.as_str())
+                                .or_else(|| action_data_obj.get("phase").and_then(|v| v.as_str()))
+                                .unwrap_or("press");
+
+                            // Hold-mode release: only forward actions that can undo a press.
+                            if phase.eq_ignore_ascii_case("release") {
+                                let is_mute_action =
+                                    matches!(raw_type, "MUTE" | "VOLUME_MUTE" | "SET_SYSTEM_MUTE")
+                                        || matches!(
+                                            def_id,
+                                            "MUTE" | "VOLUME_MUTE" | "SET_SYSTEM_MUTE"
+                                        )
+                                        || ((raw_type == "MEDIA_BUTTON"
+                                            || def_id == "MEDIA_BUTTON")
+                                            && act
+                                                .get("button")
+                                                .and_then(|v| v.as_str())
+                                                .map(|button| button.eq_ignore_ascii_case("mute"))
+                                                .unwrap_or(false));
+
+                                if !is_mute_action {
+                                    println!(
+                                        "[RUST ENGINE] Skipping non-hold action on release: '{}' / '{}'",
+                                        raw_type, def_id
+                                    );
+                                    continue;
+                                }
+                            }
+
+                            println!(
+                                "[RUST ENGINE] Executing core action: '{}' / '{}'",
+                                raw_type, def_id
+                            );
                             ActionRunner::run_action(act).await;
                         } else {
-                            let lookup_key = if !raw_type.is_empty() && raw_type != "UNKNOWN" { raw_type } else { def_id };
-                            if let Some(res) = state.plugin_manager.handle_execute(lookup_key, act) {
-                                println!("[RUST ENGINE] Plugin action: {} - {}", res.success, res.message);
-                            } else if let Some(res) = state.plugin_manager.handle_execute(def_id, act) {
-                                println!("[RUST ENGINE] Plugin action (def_id): {} - {}", res.success, res.message);
+                            let phase = act
+                                .get("phase")
+                                .and_then(|v| v.as_str())
+                                .or_else(|| action_data_obj.get("phase").and_then(|v| v.as_str()))
+                                .unwrap_or("press");
+
+                            if phase.eq_ignore_ascii_case("release") {
+                                println!(
+                                    "[RUST ENGINE] Forwarding hold release to plugin action: '{}' / '{}'",
+                                    raw_type, def_id
+                                );
+                            }
+
+                            let lookup_key = if !raw_type.is_empty() && raw_type != "UNKNOWN" {
+                                raw_type
                             } else {
-                                println!("[RUST ENGINE] Plugin action handler not found: '{}' / '{}'", raw_type, def_id);
+                                def_id
+                            };
+                            if let Some(res) = state.plugin_manager.handle_execute(lookup_key, act)
+                            {
+                                println!(
+                                    "[RUST ENGINE] Plugin action: {} - {}",
+                                    res.success, res.message
+                                );
+                            } else if let Some(res) =
+                                state.plugin_manager.handle_execute(def_id, act)
+                            {
+                                println!(
+                                    "[RUST ENGINE] Plugin action (def_id): {} - {}",
+                                    res.success, res.message
+                                );
+                            } else {
+                                println!(
+                                    "[RUST ENGINE] Plugin action handler not found: '{}' / '{}'",
+                                    raw_type, def_id
+                                );
                             }
                         }
                     }
@@ -504,13 +617,25 @@ async fn send_action(
             }
         }
         "GET_ACTION_DATA" => {
-            let request_id = parsed.get("requestId").and_then(|v| v.as_str()).unwrap_or("");
+            let request_id = parsed
+                .get("requestId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let action_name = parsed.get("action").and_then(|v| v.as_str()).unwrap_or("");
-            let data_type = parsed.get("dataType").and_then(|v| v.as_str()).unwrap_or("");
+            let data_type = parsed
+                .get("dataType")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let empty_args = serde_json::json!({});
             let args = parsed.get("args").unwrap_or(&empty_args);
 
-            state.plugin_manager.handle_get_action_data(&app, request_id, action_name, data_type, args);
+            state.plugin_manager.handle_get_action_data(
+                &app,
+                request_id,
+                action_name,
+                data_type,
+                args,
+            );
         }
         "LOAD_PLUGINS" => {
             if let Ok(root) = isudeck_root(&app) {
@@ -552,7 +677,9 @@ fn start_input_thread(app_handle: tauri::AppHandle, state: Arc<EngineState>) {
 #[command]
 fn set_window_always_on_top(always_on_top: bool, app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
-        window.set_always_on_top(always_on_top).map_err(|e| e.to_string())?;
+        window
+            .set_always_on_top(always_on_top)
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -665,11 +792,19 @@ pub fn run() {
             set_autostart,
             get_app_version,
             get_platform,
-            open_external_url
+            open_external_url,
+            plugin_store::plugin_store_fetch_registry,
+            plugin_store::plugin_store_install_from_url,
+            plugin_store::plugin_store_install_from_file,
+            plugin_store::plugin_store_uninstall,
+            plugin_store::plugin_store_validate,
+            plugin_store::plugin_manager_stop_plugin
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
-            state_clone.plugin_manager.set_app_handle(app_handle.clone());
+            state_clone
+                .plugin_manager
+                .set_app_handle(app_handle.clone());
 
             // 1. Bootstrap (fast - just creates dirs/files if missing)
             bootstrap_portable_environment(&app_handle);

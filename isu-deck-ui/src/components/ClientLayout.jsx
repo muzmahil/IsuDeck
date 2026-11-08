@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import Sidebar from './Sidebar';
 import SplashScreen from './SplashScreen';
 import DisclaimerModal from './DisclaimerModal';
-import useStore from '../store/useStore';
+import useStore, { claimHoldBinding, getHoldBindingKey, releaseHoldBinding } from '../store/useStore';
 import { fileSystem } from '../utils/fileSystem';
 
 export default function ClientLayout({ children }) {
@@ -16,7 +16,6 @@ export default function ClientLayout({ children }) {
     toast,
     setToast,
     isInputRecording, 
-    triggerProfileUpdate, 
     language,
     setLanguage, 
     sendToEngine,
@@ -31,7 +30,9 @@ export default function ClientLayout({ children }) {
     plugins,
     lastHandledMsgId,
     markMessageHandled,
-    activeTab
+    activeTab,
+    executeLogicSequence,
+    executeHoldRelease
   } = useStore();
   const activeTabRef = useRef(activeTab);
   useEffect(() => {
@@ -88,11 +89,37 @@ export default function ClientLayout({ children }) {
   useEffect(() => {
     const currentTheme = settings?.theme || 'midnight';
     const accent = settings?.accentColor || '#3b82f6';
-    if (typeof document !== 'undefined') {
-      document.documentElement.setAttribute('data-theme', currentTheme);
-      document.documentElement.style.setProperty('--primary-accent', accent);
-      document.body.className = document.body.className.replace(/\btheme-\w+/g, '').trim() + ` theme-${currentTheme}`;
+    if (typeof document === 'undefined') return;
+
+    const themeBackgrounds = {
+      midnight: '#0b0f17',
+      dark: '#121212',
+      light: '#f8fafc'
+    };
+    const background = themeBackgrounds[currentTheme] || themeBackgrounds.midnight;
+
+    document.documentElement.setAttribute('data-theme', currentTheme);
+    document.documentElement.style.setProperty('--primary-accent', accent);
+    // Keep the pre-paint boot surface in sync so page transitions never reveal
+    // the webview's default white background.
+    document.documentElement.style.setProperty('--boot-bg', background);
+    document.documentElement.style.colorScheme = currentTheme === 'light' ? 'light' : 'dark';
+    document.body.className = document.body.className.replace(/\btheme-\w+/g, '').trim() + ` theme-${currentTheme}`;
+
+    // Remember the theme for the next launch so index.html can paint it before
+    // React and the CSS bundle are ready.
+    try {
+      localStorage.setItem('isu_theme', currentTheme);
+    } catch (_) {
+      /* storage unavailable */
     }
+
+    // Match the native window/webview surface to the theme as well.
+    import('@tauri-apps/api/webviewWindow')
+      .then(({ getCurrentWebviewWindow }) => getCurrentWebviewWindow().setBackgroundColor(background))
+      .catch(() => {
+        /* not running inside Tauri (browser preview) */
+      });
   }, [settings?.theme, settings?.accentColor]);
 
   // 2️⃣ PING LOOP (SADECE CONNECTED / SLOW)
@@ -211,6 +238,38 @@ export default function ClientLayout({ children }) {
   // --- 3. GLOBAL INPUT DİNLEYİCİSİ (Background Listener) ---
   useEffect(() => {
     if (!lastMessage) return;
+
+    const findMatchingButton = async (message) => {
+      const currentProfiles = profiles.length > 0 ? profiles : await loadProfiles();
+      if (!currentProfiles || currentProfiles.length === 0) return null;
+
+      const activeProfile = currentProfiles.find(p => p.isActive) || currentProfiles[0];
+      const buttons = activeProfile?.buttons || [];
+
+      const matchIndex = buttons.findIndex(btn => {
+        if (!btn?.binding) return false;
+
+        const btnKey = String(btn.binding.key);
+        const msgKey = String(message.key);
+
+        if (btnKey !== msgKey) return false;
+
+        let isHidMatch = true;
+        if (btn.binding.hid && message.hid) {
+          const bHid = String(btn.binding.hid);
+          const mHid = String(message.hid);
+          if (bHid !== 'KEYBOARD_HOOK' && mHid !== 'KEYBOARD_HOOK' && bHid !== '*' && mHid !== '*') {
+            isHidMatch = (bHid === mHid);
+          }
+        }
+
+        return isHidMatch;
+      });
+
+      if (matchIndex === -1) return null;
+      return { button: buttons[matchIndex], index: matchIndex };
+    };
+
     const processMessage = async () => {
       switch (lastMessage.type) {
         case 'inputPressed': {
@@ -239,34 +298,26 @@ export default function ClientLayout({ children }) {
 
           // Profil ve Buton bulma işlemi (RAM Cache - 0ms gecikme)
           try {
-            const currentProfiles = profiles.length > 0 ? profiles : await loadProfiles();
-            if (currentProfiles && currentProfiles.length > 0) {
-              const activeProfile = currentProfiles.find(p => p.isActive) || currentProfiles[0];
-              const buttons = activeProfile?.buttons || [];
+            const match = await findMatchingButton(lastMessage);
+            if (match) {
+              const { button, index: matchIndex } = match;
 
-              const matchIndex = buttons.findIndex(btn => {
-                if (!btn?.binding) return false;
+              if (button.holdMode === true) {
+                const holdKey = getHoldBindingKey(lastMessage);
+                if (!claimHoldBinding(holdKey)) return; // Ignore key auto-repeat.
 
-                const btnKey = String(btn.binding.key);
-                const msgKey = String(lastMessage.key);
-
-                if (btnKey !== msgKey) return false;
-
-                let isHidMatch = true;
-                if (btn.binding.hid && lastMessage.hid) {
-                  const bHid = String(btn.binding.hid);
-                  const mHid = String(lastMessage.hid);
-                  if (bHid !== 'KEYBOARD_HOOK' && mHid !== 'KEYBOARD_HOOK' && bHid !== '*' && mHid !== '*') {
-                    isHidMatch = (bHid === mHid);
-                  }
+                if (button.actions?.length > 0 && executeLogicSequence) {
+                  executeLogicSequence(button.actions, { phase: 'press' });
                 }
 
-                return isHidMatch;
-              });
+                setExecutionFeedback(`Action: ${button.label}`);
+                setTimeout(() => setExecutionFeedback(null), 1500);
+                return;
+              }
 
-              if (matchIndex !== -1) {
-                const button = buttons[matchIndex];
-
+              if (button.actions?.length > 0 && executeLogicSequence) {
+                executeLogicSequence(button.actions);
+              } else {
                 const payload = {
                   type: 'EXECUTE_ACTION',
                   buttonIndex: matchIndex,
@@ -278,18 +329,44 @@ export default function ClientLayout({ children }) {
                   timestamp: Date.now()
                 };
                 sendToEngine(payload);
-
-                setExecutionFeedback(`Action: ${button.label}`);
-                setTimeout(() => setExecutionFeedback(null), 1500);
               }
+
+              setExecutionFeedback(`Action: ${button.label}`);
+              setTimeout(() => setExecutionFeedback(null), 1500);
             }
           } catch (e) { console.error('Global aksiyon hatası:', e); }
+          break;
+        }
+
+        case 'inputReleased': {
+          const msgId = lastMessage._msgId;
+          if (msgId && (msgId === lastHandledMsgId || msgId === lastProcessedMsgIdRef.current)) {
+            return;
+          }
+
+          if (activeTabRef.current === 'deck') return;
+
+          if (msgId) {
+            lastProcessedMsgIdRef.current = msgId;
+            markMessageHandled(msgId);
+          }
+
+          // Ignore releases without a matching press so the action is not
+          // executed a second time after navigation or a missed key-down.
+          if (!releaseHoldBinding(getHoldBindingKey(lastMessage))) return;
+
+          try {
+            const match = await findMatchingButton(lastMessage);
+            if (match && match.button.holdMode === true && match.button.actions?.length > 0 && executeHoldRelease) {
+              executeHoldRelease(match.button.actions);
+            }
+          } catch (e) { console.error('Global hold release error:', e); }
           break;
         }
       }
     };
     processMessage();
-  }, [lastMessage, isInputRecording, sendToEngine, lastHandledMsgId, markMessageHandled]);
+  }, [lastMessage, isInputRecording, sendToEngine, lastHandledMsgId, markMessageHandled, executeLogicSequence, executeHoldRelease, profiles, loadProfiles]);
 
   // Toast Bildirimlerini Otomatik Kapat
   useEffect(() => {

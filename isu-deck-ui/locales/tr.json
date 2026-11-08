@@ -101,7 +101,9 @@
       "apply_anyway": "Yine de Uygula",
       "remove_other": "Diğer Atamayı Kaldır",
       "handler_id": "İşleyici ID",
-      "hid_path": "Cihaz HID Yolu"
+      "hid_path": "Cihaz HID Yolu",
+      "hold_mode": "Basılı Tutma Modu",
+      "hold_mode_desc": "Basıldığında çalıştır, bırakıldığında geri al. Tuş tekrarı yok sayılır."
     },
     "settings": {
       "show_title": "Başlığı Göster",
@@ -207,7 +209,14 @@
     "no_config": "Bu eklenti için yapılandırılabilir bir ayar bulunmuyor.",
     "preview": "Önizleme",
     "cancel": "İptal",
-    "save": "Kaydet"
+    "save": "Kaydet",
+    "readme": "Dokümantasyon",
+    "details": "Ayrıntılar",
+    "catalog": "Katalog",
+    "execution_mode": "Çalışma Modu",
+    "platforms": "Platformlar",
+    "daemon_mode": "Daemon (Arka Plan Servisi)",
+    "oneshot_mode": "Tek Seferlik (Boşta RAM Yok)"
   },
   "splash": {
     "loading": "IsuDeck Yükleniyor...",

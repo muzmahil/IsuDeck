@@ -4,6 +4,36 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { fileSystem } from '../utils/fileSystem';
 
+let profileWriteQueue = Promise.resolve();
+
+// Tracks bindings that are currently held down. Windows key auto-repeat sends
+// repeated key-down events, so this prevents hold-mode actions from spamming.
+const heldBindingKeys = new Set();
+
+export const getHoldBindingKey = (message) => {
+  if (!message) return '';
+  const hid = message.hid !== undefined && message.hid !== null ? String(message.hid) : '*';
+  return `${hid}::${String(message.key)}`;
+};
+
+export const claimHoldBinding = (key) => {
+  if (!key) return false;
+  if (heldBindingKeys.has(key)) return false;
+  heldBindingKeys.add(key);
+  return true;
+};
+
+export const releaseHoldBinding = (key) => {
+  if (!key) return false;
+  return heldBindingKeys.delete(key);
+};
+
+const enqueueProfileWrite = (operation) => {
+  const result = profileWriteQueue.then(operation, operation);
+  profileWriteQueue = result.catch(() => {});
+  return result;
+};
+
 const useStore = create((set, get) => ({
   // ... (Diğer State ve Setter'lar AYNI KALSIN) ...
   activeTab: 'deck',
@@ -12,7 +42,6 @@ const useStore = create((set, get) => ({
   lastMessage: null,
   toast: null,
   isInputRecording: false,
-  profileUpdateTrigger: 0,
   plugins: [],
   language: 'en',
   isMiniMode: false,
@@ -23,7 +52,10 @@ const useStore = create((set, get) => ({
   lastHandledMsgId: null,
   markMessageHandled: (msgId) => set({ lastHandledMsgId: msgId }),
   updateInfo: null,
+  updatePromptOpen: false,
+  setUpdatePromptOpen: (open) => set({ updatePromptOpen: open }),
   isCheckingUpdate: false,
+  settingsLoaded: false,
   setUpdateInfo: (info) => set({ updateInfo: info }),
   setIsCheckingUpdate: (bool) => set({ isCheckingUpdate: bool }),
   settings: {
@@ -35,6 +67,9 @@ const useStore = create((set, get) => ({
     minimizeToTray: false,
     autoStart: false,
     autoCheckUpdates: true,
+    skippedUpdateVersion: null,
+    deferredUpdateVersion: null,
+    updateReminderAt: 0,
     defaultSoundFeedback: true,
     defaultShowTitle: true,
     defaultGridSize: 15,
@@ -145,9 +180,12 @@ const useStore = create((set, get) => ({
     systemMetrics: { ...state.systemMetrics, ...partial }
   })),
 
-  executeLogicSequence: async (actions) => {
+  executeLogicSequence: async (actions, options = {}) => {
     if (!actions || !Array.isArray(actions)) return;
     const { variables, setVariableValue, changeVariableValue, systemMetrics, sendToEngine } = get();
+    const executionPhase = options?.phase;
+
+    const buildEngineAction = (act) => executionPhase ? { ...act, phase: executionPhase } : act;
 
     const evaluateValue = (valStr) => {
       if (valStr === undefined || valStr === null) return '';
@@ -202,6 +240,7 @@ const useStore = create((set, get) => ({
       for (const act of list) {
         if (!act) continue;
         const type = act.definitionId || act.type;
+        const normalizedType = String(type || '').toUpperCase();
 
         if (type === 'SET_VARIABLE') {
           const varName = act.variableName || act.varName;
@@ -229,7 +268,7 @@ const useStore = create((set, get) => ({
           if (matchingVol) {
             changeVariableValue('vol', delta, 0, 100, true);
           } else {
-            sendToEngine({ type: 'EXECUTE_ACTION', actionData: { actions: [act] } });
+            sendToEngine({ type: 'EXECUTE_ACTION', actionData: { actions: [buildEngineAction(act)] } });
           }
         } else if (type === 'IF_CONDITION') {
           const isMet = evaluateCondition(act.leftOperand, act.operator || '==', act.rightOperand);
@@ -264,14 +303,58 @@ const useStore = create((set, get) => ({
           if (duration > 0) {
             await new Promise(r => setTimeout(r, duration));
           }
+        } else if (normalizedType === 'CHANGE_PROFILE' || normalizedType === 'SWITCH_PROFILE') {
+          const targetProfileId = act.profileId ?? act.targetProfileId;
+          if (targetProfileId === undefined || targetProfileId === null || targetProfileId === '') {
+            console.error('Profile change action is missing its target profile ID.');
+            continue;
+          }
+
+          const currentProfiles = await get().loadProfiles();
+          const targetIndex = currentProfiles.findIndex(
+            profile => String(profile.id) === String(targetProfileId)
+          );
+          if (targetIndex === -1) {
+            console.error(`Profile change action target not found: ${targetProfileId}`);
+            continue;
+          }
+
+          const updatedProfiles = currentProfiles.map((profile, index) => ({
+            ...profile,
+            isActive: index === targetIndex
+          }));
+          await get().saveProfiles(updatedProfiles);
+          const activeProfile = updatedProfiles[targetIndex];
+          const blocks = (activeProfile.buttons || [])
+            .filter(button => button?.binding?.hid && button?.binding?.key)
+            .map(button => ({
+              hid: button.binding.hid,
+              key: button.binding.key
+            }));
+          sendToEngine({ type: 'init_block_list', blocks });
         } else {
           // Standard system / plugin action
-          sendToEngine({ type: 'EXECUTE_ACTION', actionData: { actions: [act] } });
+          sendToEngine({ type: 'EXECUTE_ACTION', actionData: { actions: [buildEngineAction(act)] } });
         }
       }
     };
 
     await executeActionList(actions);
+  },
+
+  executeHoldRelease: async (actions) => {
+    if (!actions || !Array.isArray(actions)) return;
+    const { sendToEngine } = get();
+
+    for (const act of actions) {
+      if (!act) continue;
+      if (!isHoldReleaseAction(act)) continue;
+
+      await sendToEngine({
+        type: 'EXECUTE_ACTION',
+        actionData: { actions: [{ ...act, phase: 'release' }] }
+      });
+    }
   },
 
   setIsDriverInstalled: (val) => set({ isDriverInstalled: val }),
@@ -302,7 +385,6 @@ const useStore = create((set, get) => ({
   setLastMessage: (message) => set({ lastMessage: message }),
   setToast: (toast) => set({ toast }),
   setIsInputRecording: (isRecording) => set({ isInputRecording: isRecording }),
-  triggerProfileUpdate: () => set((state) => ({ profileUpdateTrigger: state.profileUpdateTrigger + 1 })),
   profiles: [],
   setProfiles: (profiles) => set({ profiles }),
   setPlugins: (plugins) => set({ plugins }),
@@ -325,9 +407,9 @@ const useStore = create((set, get) => ({
         const installed = await invoke('check_driver_installed');
         status = installed ? 'active' : 'uninstalled';
       }
-      set({ 
-        driverStatus: status, 
-        isDriverInstalled: status === 'active' 
+      set({
+        driverStatus: status,
+        isDriverInstalled: status === 'active'
       });
       return status;
     } catch (e) {
@@ -465,6 +547,8 @@ const useStore = create((set, get) => ({
       }
     } catch (e) {
       console.error("Settings Load Error:", e);
+    } finally {
+      set({ settingsLoaded: true });
     }
   },
 
@@ -495,8 +579,44 @@ const useStore = create((set, get) => ({
   },
 
   saveProfiles: async (newProfiles) => {
-    set({ profiles: newProfiles });
-    await fileSystem.writeFile('profiles.json', newProfiles);
+    return enqueueProfileWrite(async () => {
+      await fileSystem.writeFile('profiles.json', newProfiles);
+      set({ profiles: newProfiles });
+      return newProfiles;
+    });
+  },
+
+  updateActiveProfile: (profileId, changes) => enqueueProfileWrite(async () => {
+    if (profileId === null || profileId === undefined) {
+      throw new Error('Cannot save deck changes without an active profile ID.');
+    }
+
+    const content = await fileSystem.readFile('profiles.json');
+    const profiles = content ? JSON.parse(content) : [];
+    const profileIndex = profiles.findIndex(profile => String(profile.id) === String(profileId));
+    if (profileIndex === -1) {
+      throw new Error(`Active profile ${profileId} was not found while saving deck changes.`);
+    }
+
+    const activeProfile = profiles.find(profile => profile.isActive) || profiles[0];
+    if (String(activeProfile.id) !== String(profileId)) {
+      throw new Error('Active profile changed before deck changes could be saved.');
+    }
+
+    const updatedProfiles = profiles.map((profile, index) =>
+      index === profileIndex ? { ...profile, ...changes } : profile
+    );
+    await fileSystem.writeFile('profiles.json', updatedProfiles);
+    set({ profiles: updatedProfiles });
+    return updatedProfiles;
+  }),
+
+  persistLoadedProfiles: async (loadedProfiles) => {
+    return enqueueProfileWrite(async () => {
+      await fileSystem.writeFile('profiles.json', loadedProfiles);
+      set({ profiles: loadedProfiles });
+      return loadedProfiles;
+    });
   },
 }));
 
@@ -511,6 +631,31 @@ const STATIC_ACTION_KEYS = new Set([
   'VIRTUAL_DESKTOP_LEFT', 'VIRTUAL_DESKTOP_RIGHT',
   'BRIGHTNESS_UP', 'BRIGHTNESS_DOWN', 'TIMER_START', 'EMPTY_RECYCLE_BIN', 'SYSTEM_SLEEP', 'SWITCH_AUDIO_OUTPUT'
 ]);
+
+const HOLD_RELEASE_CORE_ACTIONS = new Set(['MUTE', 'VOLUME_MUTE', 'SET_SYSTEM_MUTE']);
+
+// Hold mode executes the full action sequence once on press. On release only
+// actions that can undo their press effect are forwarded to the engine.
+export const isHoldReleaseAction = (act) => {
+  if (!act) return false;
+
+  const defId = String(act.definitionId || act.type || '').toUpperCase();
+  const rawType = String(act.type || '').toUpperCase();
+
+  if (HOLD_RELEASE_CORE_ACTIONS.has(defId) || HOLD_RELEASE_CORE_ACTIONS.has(rawType)) {
+    return true;
+  }
+
+  if (
+    (rawType === 'MEDIA_BUTTON' || defId === 'MEDIA_BUTTON') &&
+    String(act.button || '').toLowerCase() === 'mute'
+  ) {
+    return true;
+  }
+
+  // Every action that is not a built-in system action is a plugin action.
+  return !STATIC_ACTION_KEYS.has(defId) && !STATIC_ACTION_KEYS.has(rawType);
+};
 
 export const getDynamicStateForButton = (button, dynamicStates) => {
   if (!button || !button.actions || !Array.isArray(button.actions) || !dynamicStates) return null;
@@ -536,7 +681,7 @@ export const getDynamicStateForButton = (button, dynamicStates) => {
       const filterPart = filterParts.join('::');
 
       const cleanActionName = actionName.split('.').pop().toLowerCase();
-      const isActionMatch = 
+      const isActionMatch =
         actionName.toLowerCase() === defId.toLowerCase() ||
         cleanActionName === cleanDefId ||
         defId.toLowerCase() === `plugin_${actionName.toLowerCase()}` ||

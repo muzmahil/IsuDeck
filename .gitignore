@@ -22,6 +22,7 @@ node_modules/
 # --- Frontend & Build Outputs ---
 dist/
 **/dist/
+plugin-site-dist/
 build/
 **/build/
 .next/
@@ -35,6 +36,8 @@ out/
 profiles.json
 settings.json
 variables.json
+plugin_registry_cache.json
+**/discord_token.json
 config.json
 **/config.json
 *.log

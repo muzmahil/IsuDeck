@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -5,8 +7,6 @@ use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tauri::Emitter;
 
 #[cfg(windows)]
@@ -32,15 +32,21 @@ pub struct ActionResult {
 
 impl ActionResult {
     pub fn ok(msg: &str) -> Self {
-        Self { success: true, message: msg.to_string() }
+        Self {
+            success: true,
+            message: msg.to_string(),
+        }
     }
     pub fn fail(msg: &str) -> Self {
-        Self { success: false, message: msg.to_string() }
+        Self {
+            success: false,
+            message: msg.to_string(),
+        }
     }
 }
 
 pub struct RunningPluginProcess {
-    pub name: String,
+    dir_name: String,
     stdin: Arc<Mutex<ChildStdin>>,
     pending_data: Arc<Mutex<HashMap<String, std::sync::mpsc::Sender<Vec<DataListItem>>>>>,
     pending_exec: Arc<Mutex<HashMap<String, std::sync::mpsc::Sender<ActionResult>>>>,
@@ -158,18 +164,48 @@ impl PluginManager {
         for p in procs.drain(..) {
             if let Ok(mut child) = p.child.lock() {
                 let _ = child.kill();
+                // Wait so the executable is released before files are replaced or
+                // the plugin is started again with a fresh configuration.
+                let _ = child.wait();
             }
         }
         let mut map = self.action_map.lock().unwrap();
         map.clear();
     }
 
+    pub fn stop_plugin(&self, dir_name: &str) {
+        let mut procs = self.processes.lock().unwrap();
+        procs.retain(|p| {
+            if p.dir_name == dir_name {
+                if let Ok(mut child) = p.child.lock() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                false
+            } else {
+                true
+            }
+        });
+
+        let mut map = self.action_map.lock().unwrap();
+        map.retain(|_, target| match target {
+            ActionTarget::Daemon { proc, .. } => proc.dir_name != dir_name,
+            ActionTarget::OneShot { dir_path, .. } => {
+                dir_path.file_name().and_then(|name| name.to_str()) != Some(dir_name)
+            }
+        });
+    }
+
     pub fn reload_all(&self, plugins_dir: &Path) {
-        self.stop_all();
         self.load_plugins_from_dir(plugins_dir);
     }
 
     pub fn load_plugins_from_dir(&self, plugins_dir: &Path) {
+        // Reload from disk as a full restart. This applies config.json edits,
+        // enable/disable changes, updates, and removals without duplicating
+        // already-running daemon processes.
+        self.stop_all();
+
         if !plugins_dir.exists() {
             return;
         }
@@ -178,6 +214,9 @@ impl PluginManager {
             Ok(e) => e,
             Err(_) => return,
         };
+
+        // Rebuild the action map from disk so removed or updated actions do not linger.
+        self.action_map.lock().unwrap().clear();
 
         for entry in entries.flatten() {
             let path = entry.path();
@@ -200,7 +239,16 @@ impl PluginManager {
                 Err(_) => continue,
             };
 
-            let plugin_name = manifest.get("name").and_then(|v| v.as_str()).unwrap_or("Unknown Plugin").to_string();
+            let plugin_name = manifest
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown Plugin")
+                .to_string();
+            let dir_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_string();
 
             // Varsa eklentinin config.json dosyasını oku
             let config_json = path.join("config.json");
@@ -214,20 +262,25 @@ impl PluginManager {
             }
 
             // Plugin enabled / disabled check
-            let is_enabled = config_val.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+            let is_enabled = config_val
+                .get("enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
             if !is_enabled {
                 println!("[PluginManager] Plugin disabled: {}", plugin_name);
                 continue;
             }
 
             // Eklenti türü: daemon (canlı/uzun çalışan) veya on_demand (tek seferlik)
-            let is_daemon = manifest.get("daemon")
+            let is_daemon = manifest
+                .get("daemon")
                 .and_then(|v| v.as_bool())
                 .or_else(|| manifest.get("background").and_then(|v| v.as_bool()))
                 .unwrap_or(false);
 
             // Eklenti çalıştırılabilir dosyasını bul
-            let mut exe_name = manifest.get("executable")
+            let mut exe_name = manifest
+                .get("executable")
                 .or_else(|| manifest.get("main"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
@@ -245,8 +298,14 @@ impl PluginManager {
                             let is_exec = {
                                 use std::os::unix::fs::PermissionsExt;
                                 // Accept files with no extension OR common Linux plugin patterns (.sh, .py, native binary)
-                                let has_no_unwanted_ext = p.extension()
-                                    .map(|e| !matches!(e.to_str().unwrap_or(""), "json" | "md" | "txt" | "log" | "dll" | "so"))
+                                let has_no_unwanted_ext = p
+                                    .extension()
+                                    .map(|e| {
+                                        !matches!(
+                                            e.to_str().unwrap_or(""),
+                                            "json" | "md" | "txt" | "log" | "dll" | "so"
+                                        )
+                                    })
                                     .unwrap_or(true);
                                 let is_executable = std::fs::metadata(&p)
                                     .map(|m| m.permissions().mode() & 0o111 != 0)
@@ -271,7 +330,10 @@ impl PluginManager {
 
             let exe_path = path.join(&exe_name);
             if !exe_path.exists() {
-                println!("[PluginManager] Plugin executable not found: {:?}", exe_path);
+                println!(
+                    "[PluginManager] Plugin executable not found: {:?}",
+                    exe_path
+                );
                 continue;
             }
 
@@ -284,7 +346,10 @@ impl PluginManager {
 
             // 1. One-Shot Plugin
             if !is_daemon {
-                println!("[PluginManager] Registered one-shot plugin: {} (0 MB idle RAM)", plugin_name);
+                println!(
+                    "[PluginManager] Registered one-shot plugin: {} (0 MB idle RAM)",
+                    plugin_name
+                );
                 if let Some(actions) = manifest.get("actions").and_then(|a| a.as_array()) {
                     let mut map = self.action_map.lock().unwrap();
                     for act in actions {
@@ -308,7 +373,7 @@ impl PluginManager {
             {
                 let procs = self.processes.lock().unwrap();
                 for p in procs.iter() {
-                    if p.name == plugin_name {
+                    if p.dir_name == dir_name {
                         if let Ok(mut child) = p.child.lock() {
                             if child.try_wait().ok().flatten().is_none() {
                                 already_running_proc = Some(p.clone());
@@ -338,7 +403,10 @@ impl PluginManager {
                 continue;
             }
 
-            println!("[PluginManager] Starting daemon plugin: {} ({:?})", plugin_name, exe_path);
+            println!(
+                "[PluginManager] Starting daemon plugin: {} ({:?})",
+                plugin_name, exe_path
+            );
 
             let mut cmd = Command::new(&exe_path);
             cmd.current_dir(&path)
@@ -352,7 +420,10 @@ impl PluginManager {
             let mut child = match cmd.spawn() {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("[PluginManager] Failed to start daemon plugin: {:?}, error: {}", exe_path, e);
+                    eprintln!(
+                        "[PluginManager] Failed to start daemon plugin: {:?}, error: {}",
+                        exe_path, e
+                    );
                     continue;
                 }
             };
@@ -367,8 +438,11 @@ impl PluginManager {
                 None => continue,
             };
 
-            let pending_data: Arc<Mutex<HashMap<String, std::sync::mpsc::Sender<Vec<DataListItem>>>>> = Arc::new(Mutex::new(HashMap::new()));
-            let pending_exec: Arc<Mutex<HashMap<String, std::sync::mpsc::Sender<ActionResult>>>> = Arc::new(Mutex::new(HashMap::new()));
+            let pending_data: Arc<
+                Mutex<HashMap<String, std::sync::mpsc::Sender<Vec<DataListItem>>>>,
+            > = Arc::new(Mutex::new(HashMap::new()));
+            let pending_exec: Arc<Mutex<HashMap<String, std::sync::mpsc::Sender<ActionResult>>>> =
+                Arc::new(Mutex::new(HashMap::new()));
 
             let pending_data_clone = pending_data.clone();
             let pending_exec_clone = pending_exec.clone();
@@ -384,12 +458,14 @@ impl PluginManager {
                         }
                         if let Ok(val) = serde_json::from_str::<Value>(trimmed) {
                             let op = val.get("op").and_then(|v| v.as_str()).unwrap_or("");
-                            let req_id = val.get("requestId").and_then(|v| v.as_str()).unwrap_or("");
+                            let req_id =
+                                val.get("requestId").and_then(|v| v.as_str()).unwrap_or("");
 
                             if op == "data_response" {
                                 let mut lock = pending_data_clone.lock().unwrap();
                                 if let Some(tx) = lock.remove(req_id) {
-                                    let items: Vec<DataListItem> = val.get("data")
+                                    let items: Vec<DataListItem> = val
+                                        .get("data")
                                         .and_then(|d| serde_json::from_value(d.clone()).ok())
                                         .unwrap_or_default();
                                     let _ = tx.send(items);
@@ -397,8 +473,15 @@ impl PluginManager {
                             } else if op == "execute_response" {
                                 let mut lock = pending_exec_clone.lock().unwrap();
                                 if let Some(tx) = lock.remove(req_id) {
-                                    let success = val.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
-                                    let message = val.get("message").and_then(|m| m.as_str()).unwrap_or("").to_string();
+                                    let success = val
+                                        .get("success")
+                                        .and_then(|s| s.as_bool())
+                                        .unwrap_or(false);
+                                    let message = val
+                                        .get("message")
+                                        .and_then(|m| m.as_str())
+                                        .unwrap_or("")
+                                        .to_string();
                                     let _ = tx.send(ActionResult { success, message });
                                 }
                             } else if op == "state_update" {
@@ -414,7 +497,7 @@ impl PluginManager {
             });
 
             let running_proc = Arc::new(RunningPluginProcess {
-                name: plugin_name.clone(),
+                dir_name: dir_name.clone(),
                 stdin,
                 pending_data,
                 pending_exec,
@@ -459,7 +542,8 @@ impl PluginManager {
 
         let target_entry = {
             let map = self.action_map.lock().unwrap();
-            map.get(clean_name).cloned()
+            map.get(clean_name)
+                .cloned()
                 .or_else(|| map.get(&norm).cloned())
                 .or_else(|| {
                     map.iter().find_map(|(k, v)| {
@@ -474,7 +558,9 @@ impl PluginManager {
 
         let items = match target_entry {
             Some(ActionTarget::Daemon { proc, .. }) => proc.get_data(request_id, data_type, args),
-            Some(ActionTarget::OneShot { exe_path, dir_path, .. }) => {
+            Some(ActionTarget::OneShot {
+                exe_path, dir_path, ..
+            }) => {
                 let mut cmd = Command::new(&exe_path);
                 cmd.current_dir(&dir_path)
                     .arg("--get-data")
@@ -512,7 +598,8 @@ impl PluginManager {
 
         let target_entry = {
             let map = self.action_map.lock().unwrap();
-            map.get(clean_name).cloned()
+            map.get(clean_name)
+                .cloned()
                 .or_else(|| map.get(&norm).cloned())
                 .or_else(|| {
                     map.iter().find_map(|(k, v)| {
@@ -527,10 +614,20 @@ impl PluginManager {
 
         match target_entry {
             Some(ActionTarget::Daemon { proc, action_name }) => {
-                let req_id = format!("exec_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
+                let req_id = format!(
+                    "exec_{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis()
+                );
                 Some(proc.execute(&req_id, &action_name, args))
             }
-            Some(ActionTarget::OneShot { exe_path, dir_path, action_name }) => {
+            Some(ActionTarget::OneShot {
+                exe_path,
+                dir_path,
+                action_name,
+            }) => {
                 let mut cmd = Command::new(&exe_path);
                 cmd.current_dir(&dir_path)
                     .arg("--action")
@@ -545,13 +642,25 @@ impl PluginManager {
                     Ok(output) => {
                         if output.status.success() {
                             let msg = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                            Some(ActionResult::ok(if msg.is_empty() { "Action executed" } else { &msg }))
+                            Some(ActionResult::ok(if msg.is_empty() {
+                                "Action executed"
+                            } else {
+                                &msg
+                            }))
                         } else {
-                            let err_msg = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                            Some(ActionResult::fail(if err_msg.is_empty() { "Execution failed" } else { &err_msg }))
+                            let err_msg =
+                                String::from_utf8_lossy(&output.stderr).trim().to_string();
+                            Some(ActionResult::fail(if err_msg.is_empty() {
+                                "Execution failed"
+                            } else {
+                                &err_msg
+                            }))
                         }
                     }
-                    Err(e) => Some(ActionResult::fail(&format!("Failed to spawn executable: {}", e))),
+                    Err(e) => Some(ActionResult::fail(&format!(
+                        "Failed to spawn executable: {}",
+                        e
+                    ))),
                 }
             }
             None => None,

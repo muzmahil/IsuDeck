@@ -46,7 +46,7 @@ This comprehensive guide explains all features of **IsuDeck**, including initial
 
 ## 3. Profiles & Grid Layouts
 
-- **Flexible Grids:** Choose between 8 Keys (2x4), 15 Keys (3x5), or 32 Keys (4x8) grid layouts.
+- **Flexible Grids:** Choose 8, 15, or 32 keys directly, or open the additional key-count menu for 4 to 256 keys. Larger custom grids adapt their rows and columns to make better use of the available width.
 - **Multiple Profiles:** Create unlimited profiles for different games, streaming workflows, or development setups. Switch between them instantly using the `CHANGE_PROFILE` action.
 - **Mini Mode & Window Pinning:** Toggle compact mini mode or pin the window to stay always on top while working.
 
@@ -103,7 +103,7 @@ Use `LOOP_REPEAT` to execute a sequence of actions multiple times with customiza
 
 ## 6. Plugin Ecosystem & OBS Studio Integration
 
-IsuDeck features a modular plugin architecture communicating over JSON-RPC stdio:
+IsuDeck features a modular plugin architecture communicating over a line-delimited JSON stdio protocol:
 - **OBS Studio Plugin:** Connects via OBS WebSocket v5 to change scenes, switch preview/program in studio mode, toggle audio source mute, start/stop streams and recordings, and trigger transitions.
 - **Dynamic Status Badges:** Plugins can dynamically push live status badges (`LIVE`, `REC`, `MUTE`), volume levels, and border glow effects to buttons in real time.
 - **SDK & Documentation:** Refer to **[PLUGIN_SDK.md](./PLUGIN_SDK.md)** for developer instructions on building custom plugins in Rust, Python, C#, or Node.js.
@@ -132,7 +132,15 @@ To guarantee instantaneous key response under heavy CPU loads or gaming:
 
 ---
 
-## 9. License & Copyright
+## 9. Updates
+
+Open **Settings -> Updates** to check manually or control launch-time checks. IsuDeck is distributed as a single portable `IsuDeck.exe`; there is no installer. To update, close IsuDeck and replace the executable. Profiles and settings stored beside it are not replaced.
+
+**Remind me later** shows the same version again after 24 hours. **Skip this version** suppresses that release until a newer version is available. These choices are saved in the application settings.
+
+The Windows release workflow builds and attaches only `IsuDeck.exe` to a draft release. Review and publish it to make the executable available to update checks; release tags must match the app version.
+
+## 10. License & Copyright
 
 **IsuDeck by rootcf**  
 Copyright (C) 2026 rootcf.  

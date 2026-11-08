@@ -11,7 +11,12 @@ export default function SplashScreen({ onReady }) {
   const { language, settings } = useStore();
   const isTr = language === 'tr';
   const accentColor = settings?.accentColor || '#3b82f6';
-  const theme = settings?.theme || 'dark';
+  // The inline boot script in index.html already applied the persisted theme;
+  // use it so the splash matches the surface painted before React mounted.
+  const bootTheme = typeof document !== 'undefined'
+    ? document.documentElement.getAttribute('data-theme')
+    : null;
+  const theme = settings?.theme || bootTheme || 'dark';
   const [status, setStatus] = useState(isTr ? 'Sistem başlatılıyor...' : 'Starting system...');
   const [progress, setProgress] = useState(0);
   const [isError, setIsError] = useState(false);
@@ -106,7 +111,7 @@ export default function SplashScreen({ onReady }) {
           <h1 className="text-3xl font-bold tracking-tight mb-1">
             Isu<span style={{ color: accentColor }}>Deck</span>
           </h1>
-          <p className="text-zinc-400 text-xs font-medium">v1.0.0</p>
+          <p className="text-zinc-400 text-xs font-medium">v1.2.0</p>
           <p className="text-zinc-500 text-[11px] font-medium mb-8">IsuDeck by rootcf • GNU GPL v3</p>
 
           {/* Progress Bar */}

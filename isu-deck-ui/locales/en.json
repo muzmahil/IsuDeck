@@ -101,7 +101,9 @@
       "apply_anyway": "Apply Anyway",
       "remove_other": "Remove Other Assignment",
       "handler_id": "Handler ID",
-      "hid_path": "Device HID Path"
+      "hid_path": "Device HID Path",
+      "hold_mode": "Hold Mode",
+      "hold_mode_desc": "Press once, undo on release. Key repeat is ignored."
     },
     "settings": {
       "show_title": "Show Title",
@@ -207,7 +209,14 @@
     "no_config": "No configurable settings for this plugin.",
     "preview": "Preview",
     "cancel": "Cancel",
-    "save": "Save"
+    "save": "Save",
+    "readme": "Documentation",
+    "details": "Details",
+    "catalog": "Catalog",
+    "execution_mode": "Execution Mode",
+    "platforms": "Platforms",
+    "daemon_mode": "Daemon (Background Service)",
+    "oneshot_mode": "One-Shot (Zero Idle RAM)"
   },
   "splash": {
     "loading": "Loading IsuDeck...",

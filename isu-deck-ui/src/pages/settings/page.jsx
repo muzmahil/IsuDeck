@@ -15,10 +15,11 @@ export default function SettingsPage() {
     setCustomSounds,
     setToast,
     updateInfo,
-    setUpdateInfo
+    setUpdateInfo,
+    setUpdatePromptOpen
   } = useStore();
 
-  const [currentVersion, setCurrentVersion] = useState('1.1.0');
+  const [currentVersion, setCurrentVersion] = useState('1.2.0');
   const [platform, setPlatform] = useState('windows');
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
@@ -86,7 +87,7 @@ export default function SettingsPage() {
 
       if (res.updateAvailable) {
         setCheckFeedback('new_available');
-        setUpdateModalOpen(true);
+        setUpdatePromptOpen(true);
         setToast({
           title: language === 'tr' ? 'Yeni Sürüm Mevcut!' : 'New Version Available!',
           message: language === 'tr'
@@ -749,7 +750,7 @@ export default function SettingsPage() {
                   )}
                 </div>
                 <button
-                  onClick={() => setUpdateModalOpen(true)}
+                  onClick={() => setUpdatePromptOpen(true)}
                   className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 shadow-md"
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -1063,8 +1064,8 @@ export default function SettingsPage() {
                   </div>
                   <p className="text-xs text-zinc-300 leading-relaxed">
                     {language === 'tr'
-                      ? 'Yeni IsuDeck.exe dosyasını doğrudan indirebilir veya GitHub Releases sayfasından edinebilirsiniz.'
-                      : 'You can download the new IsuDeck.exe directly or visit the GitHub Releases page.'}
+                      ? 'Yeni IsuDeck.exe dosyasını indirin; uygulamayı kapatıp mevcut dosyanın yerine koyun. Profil ve ayarlarınız korunur.'
+                      : 'Download the new IsuDeck.exe, close the app, and replace the existing file. Your profiles and settings are preserved.'}
                   </p>
                 </div>
               )}

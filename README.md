@@ -44,7 +44,7 @@ By default, Windows merges all attached keyboards into a single input stream. Pr
 - 💡 **Live Status Badges:** Plugins push live updates in real time — OBS Studio displays glowing `LIVE`, `REC`, `MUTE`, or `STUDIO` indicators directly on keys.
 - ⌨️ **Unlimited Keys & Layouts:** Switch between 8-key (2x4), 15-key (3x5), 32-key (4x8), or full 104+ key keyboard layouts across unlimited custom profiles.
 - 🎨 **Visual Customization:** Browse hundreds of categorized Lucide vector icons, plugin icons, emojis, or upload custom PNG and SVG artwork.
-- 🔌 **Open Plugin Architecture:** Multi-language plugin support over JSON-RPC stdio. Create plugins in Python, Node.js, Rust, Go, or C#.
+- 🔌 **Open Plugin Architecture:** Multi-language plugin support over a line-delimited JSON stdio protocol. Create plugins in Python, Node.js, Rust, Go, or C#.
 - 📦 **100% Portable:** Clean self-contained deployment with zero Windows registry pollution.
 
 ---
@@ -80,9 +80,9 @@ By default, Windows merges all attached keyboards into a single input stream. Pr
 │                   IsuDeck Rust Engine (Tauri v2)                │
 │       • TIME_CRITICAL thread with 1ms timer precision           │
 │       • Logic & Flow Processor (Variables, If/Else, Loops)      │
-│       • Plugin Supervisor (JSON-RPC stdio IPC)                  │
+│       • Plugin Supervisor (line-delimited JSON stdio IPC)        │
 └────────────────┬───────────────────────────────┬────────────────┘
-                 │ Tauri Events                  │ stdio JSON-RPC
+                 │ Tauri Events                  │ stdio JSON
                  ▼                               ▼
 ┌─────────────────────────────────┐   ┌───────────────────────────┐
 │     IsuDeck UI (Vite + React)   │   │     External Plugins      │
@@ -159,10 +159,22 @@ After installation, manage IsuDeck directly from your terminal:
 
 ---
 
+## 🔌 Plugin Store
+
+The Plugins page uses the online catalog hosted on Cloudflare Pages to browse and install plugins. Open **Plugins > Browse** and press **Refresh Catalog**. Plugin catalog data and plugin releases are published independently from the IsuDeck application build. To ship a default catalog address, set `VITE_PLUGIN_REGISTRY_URL` before building.
+
+The Rust/Tauri backend performs HTTPS downloads, enforces a 50 MB archive limit, checks SHA-256 before extraction, rejects unsafe ZIP paths and symbolic links, limits extraction to 200 MB/1,000 entries, validates `plugin.json` and its executable, and stages updates while preserving `config.json`. A `config.json` inside a ZIP is discarded, so packages cannot ship per-user state; uninstalling removes the configuration together with the plugin folder. ZIP installs without a supplied hash are explicitly unverified; URL installs require SHA-256.
+
+SHA-256 detects corruption and transport tampering when the expected hash is trusted, but it does **not** authenticate a registry publisher: a compromised registry can replace both the URL and hash. Plugin archives contain executable code and should only be installed from sources you trust. Ed25519 registry signatures are a future hardening step; v1 does not cryptographically verify publisher identity.
+
+The online catalog is hosted on Cloudflare Pages. Plugin packages and images are served from their published HTTPS locations, such as GitHub Releases or R2; the hosted catalog contains their URLs and package SHA-256 hashes. Plugin releases are installed by users through the online store or from an external ZIP.
+
+---
+
 ## 📚 Documentation
 
 - 📖 **[USER_GUIDE.md](./USER_GUIDE.md)** — Comprehensive user guide, macro logic, dynamic variables, and troubleshooting.
-- 🔌 **[PLUGIN_SDK.md](./PLUGIN_SDK.md)** — Developer guide and JSON-RPC specification for writing custom plugins.
+- 🔌 **[PLUGIN_SDK.md](./PLUGIN_SDK.md)** — Developer guide and protocol specification for writing custom plugins.
 - 🤝 **[CONTRIBUTING.md](./CONTRIBUTING.md)** — Guidelines for contributing code, features, and plugins.
 - ⚖️ **[LICENSE.md](./LICENSE.md)** — Full GNU General Public License v3 legal text.
 

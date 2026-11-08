@@ -61,6 +61,7 @@ export const fileSystem = {
       await invoke('fs_write_file', { path: filename, content: strContent });
     } catch (e) {
       console.error(`Write File Error (${filename}):`, e);
+      throw e;
     }
   },
 
@@ -88,7 +89,16 @@ export const fileSystem = {
             if (jsonExists) {
               const jsonContent = await invoke('fs_read_file', { path: jsonPath });
               const pluginData = JSON.parse(jsonContent);
-              
+
+              // Metadata-only folders (templates, docs) are not runnable plugins.
+              const executable = typeof pluginData.executable === 'string'
+                ? pluginData.executable
+                : pluginData.main;
+              if (typeof executable !== 'string' || !executable.trim()) {
+                console.warn(`Skipping metadata-only plugin ${entryName}: no executable declared.`);
+                continue;
+              }
+
               // Load User Config
               let userConfig = {};
               const configExists = await invoke('fs_exists', { path: configPath });

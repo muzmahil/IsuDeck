@@ -1,5 +1,5 @@
-use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 
 /// Starts a background thread that reads keyboard events via Linux evdev.
@@ -17,10 +17,10 @@ pub fn start_linux_input_thread(
             .filter(|(_, d)| {
                 d.supported_keys().map_or(false, |keys| {
                     // Check if device supports common keys (letters, space, enter or numpad)
-                    keys.contains(evdev::Key::KEY_ENTER) || 
-                    keys.contains(evdev::Key::KEY_SPACE) ||
-                    keys.contains(evdev::Key::KEY_A) ||
-                    keys.contains(evdev::Key::KEY_1)
+                    keys.contains(evdev::Key::KEY_ENTER)
+                        || keys.contains(evdev::Key::KEY_SPACE)
+                        || keys.contains(evdev::Key::KEY_A)
+                        || keys.contains(evdev::Key::KEY_1)
                 })
             })
             .collect();
@@ -69,7 +69,10 @@ pub fn start_linux_input_thread(
                     .unwrap_or("event")
                     .to_string();
 
-                println!("[LINUX ENGINE] Listening on device: {} ({:?})", dev_name, path_clone);
+                println!(
+                    "[LINUX ENGINE] Listening on device: {} ({:?})",
+                    dev_name, path_clone
+                );
 
                 loop {
                     match device.fetch_events() {
@@ -82,19 +85,31 @@ pub fn start_linux_input_thread(
                                 let key_code = ev.code();
                                 let key_value = ev.value(); // 0 = release, 1 = press, 2 = repeat
 
+                                let is_blocked = {
+                                    let bl = block_list_clone.lock().unwrap();
+                                    bl.contains(&(dev_node.clone(), key_code))
+                                        || bl.contains(&(dev_path_str.clone(), key_code))
+                                        || bl.contains(&(dev_name.clone(), key_code))
+                                        || bl.contains(&("*".to_string(), key_code))
+                                };
+
                                 // key_value == 1 (press)
                                 if key_value == 1 {
-                                    let is_blocked = {
-                                        let bl = block_list_clone.lock().unwrap();
-                                        bl.contains(&(dev_node.clone(), key_code)) ||
-                                        bl.contains(&(dev_path_str.clone(), key_code)) ||
-                                        bl.contains(&(dev_name.clone(), key_code)) ||
-                                        bl.contains(&("*".to_string(), key_code))
-                                    };
-
                                     // Emit event compatible with useStore / page.js / ActionEditor
                                     let event_payload = serde_json::json!({
                                         "type": "inputPressed",
+                                        "hid": dev_node,
+                                        "deviceName": dev_name,
+                                        "devicePath": dev_path_str,
+                                        "key": key_code,
+                                        "blocked": is_blocked
+                                    });
+
+                                    let _ = app_clone.emit("INPUT_EVENT", &event_payload);
+                                } else if key_value == 0 {
+                                    // key_value == 0 (release) - used by hold-mode buttons
+                                    let event_payload = serde_json::json!({
+                                        "type": "inputReleased",
                                         "hid": dev_node,
                                         "deviceName": dev_name,
                                         "devicePath": dev_path_str,

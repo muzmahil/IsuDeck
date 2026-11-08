@@ -14,6 +14,8 @@
     "core:window:allow-set-size",
     "core:window:allow-is-maximized",
     "core:window:allow-hide",
+    "core:window:allow-set-background-color",
+    "core:webview:allow-set-webview-background-color",
     "dialog:default",
     "process:default",
     "process:allow-restart"

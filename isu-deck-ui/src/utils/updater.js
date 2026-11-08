@@ -2,10 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 /**
  * Compare two semver strings (e.g. 'v1.1.0' vs '1.0.0')
- * Returns:
- *   1 if v1 > v2
- *  -1 if v1 < v2
- *   0 if v1 === v2
+ * Returns 1 if v1 > v2, -1 if v1 < v2, and 0 if they are equal.
  */
 export function compareVersions(v1, v2) {
   const clean1 = (v1 || '').replace(/^[vV]/, '').trim();
@@ -24,33 +21,24 @@ export function compareVersions(v1, v2) {
   return 0;
 }
 
-/**
- * Get current application version from backend
- */
 export async function getAppVersion() {
   try {
     return await invoke('get_app_version');
   } catch {
-    return '1.1.0';
+    return '1.2.0';
   }
 }
 
-/**
- * Get current platform ('windows' | 'linux')
- */
 export async function getPlatform() {
   try {
     return await invoke('get_platform');
   } catch {
-    return typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('linux') 
-      ? 'linux' 
+    return typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('linux')
+      ? 'linux'
       : 'windows';
   }
 }
 
-/**
- * Open external URL in user's default browser
- */
 export async function openExternalUrl(url) {
   if (!url) return;
   try {
@@ -63,9 +51,6 @@ export async function openExternalUrl(url) {
   }
 }
 
-/**
- * Fetch latest release from GitHub Releases API
- */
 export async function checkForUpdates() {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
@@ -73,15 +58,10 @@ export async function checkForUpdates() {
   try {
     const currentVersion = await getAppVersion();
     const platform = await getPlatform();
-
     const response = await fetch('https://api.github.com/repos/muzmahil/IsuDeck/releases/latest', {
       signal: controller.signal,
-      headers: {
-        'Accept': 'application/vnd.github.v3+json'
-      }
+      headers: { Accept: 'application/vnd.github.v3+json' }
     });
-
-    clearTimeout(timeoutId);
 
     if (!response.ok) {
       throw new Error(`GitHub API returned status ${response.status}`);
@@ -89,21 +69,20 @@ export async function checkForUpdates() {
 
     const data = await response.json();
     const latestVersion = (data.tag_name || '').replace(/^[vV]/, '').trim();
+    let downloadUrl = data.html_url || 'https://github.com/muzmahil/IsuDeck/releases/latest';
 
-    // Find Windows exe download asset if present
-    let downloadUrl = data.html_url;
     if (Array.isArray(data.assets)) {
-      const exeAsset = data.assets.find(a => a.name && a.name.toLowerCase().endsWith('.exe'));
-      if (exeAsset && exeAsset.browser_download_url) {
-        downloadUrl = exeAsset.browser_download_url;
+      const releaseAsset = platform === 'windows'
+        ? data.assets.find(asset => asset.name && /^IsuDeck\.exe$/i.test(asset.name))
+        : null;
+      if (releaseAsset?.browser_download_url) {
+        downloadUrl = releaseAsset.browser_download_url;
       }
     }
 
-    const isNewer = compareVersions(latestVersion, currentVersion) > 0;
-
     return {
       success: true,
-      updateAvailable: isNewer,
+      updateAvailable: compareVersions(latestVersion, currentVersion) > 0,
       currentVersion,
       latestVersion: data.tag_name || `v${latestVersion}`,
       releaseName: data.name || `Release ${data.tag_name}`,
@@ -114,16 +93,17 @@ export async function checkForUpdates() {
       platform
     };
   } catch (error) {
-    clearTimeout(timeoutId);
     const currentVersion = await getAppVersion();
     const platform = await getPlatform();
-
     return {
       success: false,
       updateAvailable: false,
       currentVersion,
       platform,
+      htmlUrl: 'https://github.com/muzmahil/IsuDeck/releases/latest',
       error: error.name === 'AbortError' ? 'Connection timed out' : (error.message || 'Failed to check updates')
     };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }

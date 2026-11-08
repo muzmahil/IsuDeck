@@ -412,6 +412,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
   const [actions, setActions] = useState([]);
   const [assignedKey, setAssignedKey] = useState(null);
   const [bindingData, setBindingData] = useState(null);
+  const [holdMode, setHoldMode] = useState(false);
   const [showTitle, setShowTitle] = useState(true);
   const [hapticFeedback, setHapticFeedback] = useState(false);
   const [soundFeedback, setSoundFeedback] = useState(false);
@@ -721,6 +722,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
         setActions(loadedActions);
         setBindingData(initialData.binding || null);
         setAssignedKey(initialData.binding ? `Key: ${initialData.binding.key}` : null);
+        setHoldMode(initialData.holdMode === true);
         setShowTitle(initialData.showTitle !== undefined ? initialData.showTitle : true);
         setHapticFeedback(initialData.hapticFeedback || false);
         setSoundFeedback(initialData.soundFeedback || false);
@@ -745,6 +747,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
         setActions([]);
         setBindingData(null);
         setAssignedKey(null);
+        setHoldMode(false);
         setShowTitle(true);
         setHapticFeedback(false);
         setSoundFeedback(false);
@@ -755,6 +758,14 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
       }
     }
   }, [isOpen, buttonIndex, initialData, ACTION_TYPES]); // ACTION_TYPES ve initialData referansları değişse bile ref kontrolü korur
+
+  // Reset the initialization guard when the editor closes so reopening the
+  // same button always reloads the saved values, including hold mode.
+  useEffect(() => {
+    if (!isOpen) {
+      lastInitializedRef.current = null;
+    }
+  }, [isOpen]);
 
   const handleRecordingToggle = () => {
     if (isRecording) {
@@ -2802,6 +2813,24 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                     )}
                   </div>
 
+                  <div className="w-full max-w-xs bg-[#121212] rounded-lg border border-white/5 px-3 py-2.5 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <h4 className="text-xs font-medium text-zinc-200">{t('editor.binding.hold_mode', language)}</h4>
+                      <p className="text-[10px] text-zinc-500 mt-0.5 leading-snug">{t('editor.binding.hold_mode_desc', language)}</p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={holdMode}
+                      aria-label={t('editor.binding.hold_mode', language)}
+                      title={t('editor.binding.hold_mode_desc', language)}
+                      onClick={() => setHoldMode(!holdMode)}
+                      className={`w-9 h-5 rounded-full relative transition-colors cursor-pointer shrink-0 ${holdMode ? 'bg-blue-600' : 'bg-zinc-700'}`}
+                    >
+                      <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${holdMode ? 'right-0.5' : 'left-0.5'}`} />
+                    </button>
+                  </div>
+
                   {!isRecording && bindingData && (
                     <div className="w-full max-w-xs bg-[#121212] rounded-lg border border-white/5 p-3 space-y-2">
                       <div className="flex items-center justify-between text-xs">
@@ -3022,7 +3051,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
             <button onClick={handleClose} className="px-4 py-2 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer">
               {t('editor.footer.cancel', language)}
             </button>
-            <button onClick={() => { onSave({ label, bgColor, bgImage, iconType, selectedEmoji, selectedLucideIcon, selectedLucideColor, selectedPluginIcon, selectedImage, actions, binding: bindingData, showTitle, hapticFeedback, soundFeedback, customSound, disableDynamicState, textAlignment, textSize }); handleClose(); }} className="px-6 py-2 rounded-lg text-sm font-bold text-white shadow-lg transition-all cursor-pointer hover:brightness-110" style={{ backgroundColor: accentColor }}>
+            <button onClick={() => { onSave({ label, bgColor, bgImage, iconType, selectedEmoji, selectedLucideIcon, selectedLucideColor, selectedPluginIcon, selectedImage, actions, binding: bindingData, holdMode, showTitle, hapticFeedback, soundFeedback, customSound, disableDynamicState, textAlignment, textSize }); handleClose(); }} className="px-6 py-2 rounded-lg text-sm font-bold text-white shadow-lg transition-all cursor-pointer hover:brightness-110" style={{ backgroundColor: accentColor }}>
               {t('editor.footer.save', language)}
             </button>
           </div>

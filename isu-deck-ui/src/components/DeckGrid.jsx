@@ -1,7 +1,30 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import useStore, { getDynamicStateForButton } from '../store/useStore';
 import { LUCIDE_ICONS } from '../utils/lucideIcons';
+
+const getGridDimensions = (size, targetRatio) => {
+  if (size > 32) {
+    const columns = Math.ceil(Math.sqrt(size * targetRatio));
+    return { columns, rows: Math.ceil(size / columns) };
+  }
+
+  let bestDimensions = { columns: size, rows: 1 };
+  let bestDifference = Infinity;
+
+  for (let columns = 1; columns <= size; columns++) {
+    if (size % columns !== 0) continue;
+    const rows = size / columns;
+    const difference = Math.abs(columns / rows - targetRatio);
+    if (difference < bestDifference) {
+      bestDimensions = { columns, rows };
+      bestDifference = difference;
+    }
+  }
+
+  return bestDimensions;
+};
 
 export const STATIC_ACTION_KEYS = new Set([
   'OPEN_APP', 'OPEN_URL', 'HOTKEY', 'PLAY_SOUND',
@@ -33,22 +56,44 @@ export const resolveTemplateString = (str, variables = [], systemMetrics = {}) =
   });
 };
 
-export default function DeckGrid({ buttons, gridSize, onTrigger, onEdit, pressedButtonIndex, readOnly = false }) {
+export default function DeckGrid({ buttons, gridSize, onTrigger, onEdit, onHoldStart, onHoldEnd, pressedButtonIndex, readOnly = false }) {
   const { isMiniMode, dynamicButtonStates, settings, plugins, language, t, variables, systemMetrics } = useStore();
   const accentColor = settings?.accentColor || '#3b82f6';
+  const activeHoldPointersRef = useRef(new Set());
+  const [viewportHeight, setViewportHeight] = useState(
+    typeof window === 'undefined' ? 768 : window.innerHeight
+  );
+  const isPresetSize = [8, 15, 32].includes(gridSize);
+  const { columns, rows } = getGridDimensions(gridSize, isMiniMode ? 0.5 : 2);
+
+  useEffect(() => {
+    const updateViewportHeight = () => setViewportHeight(window.innerHeight);
+    window.addEventListener('resize', updateViewportHeight);
+    return () => window.removeEventListener('resize', updateViewportHeight);
+  }, []);
+
+  const customGridStyle = isPresetSize ? {} : {
+    aspectRatio: `${columns} / ${rows}`,
+    maxWidth: `${Math.min(
+      isMiniMode ? 340 : 1280,
+      Math.max(1, (viewportHeight - (isMiniMode ? 140 : 220)) * columns / rows)
+    )}px`
+  };
 
   const getGridClasses = () => {
     if (isMiniMode) {
       switch(gridSize) {
         case 8: return "max-w-[340px] aspect-[2/4]";
         case 32: return "max-w-[350px]";
-        default: return "max-w-[340px] aspect-[3/5]"; // 15
+        case 15: return "max-w-[340px] aspect-[3/5]";
+        default: return "max-w-[340px]";
       }
     }
     switch(gridSize) {
       case 8: return "grid-cols-4 grid-rows-2 aspect-[2/1] max-w-4xl";
       case 32: return "grid-cols-8 grid-rows-4 aspect-[2/1] max-w-7xl";
-      default: return "grid-cols-5 grid-rows-3 aspect-[16/10] max-w-5xl"; // 15
+      case 15: return "grid-cols-5 grid-rows-3 aspect-[16/10] max-w-5xl";
+      default: return "max-w-7xl";
     }
   };
 
@@ -57,20 +102,41 @@ export default function DeckGrid({ buttons, gridSize, onTrigger, onEdit, pressed
       switch(gridSize) {
         case 8: return "grid-cols-2 grid-rows-4 gap-2";
         case 32: return "grid-cols-4 grid-rows-8 gap-1";
-        default: return "grid-cols-3 grid-rows-5 gap-1.5";
+        case 15: return "grid-cols-3 grid-rows-5 gap-1.5";
+        default: return "gap-1";
       }
     }
     switch(gridSize) {
       case 8: return "grid-cols-4 grid-rows-2 gap-3 md:gap-6";
       case 32: return "grid-cols-8 grid-rows-4 gap-2 md:gap-4";
-      default: return "grid-cols-5 grid-rows-3 gap-3 md:gap-6";
+      case 15: return "grid-cols-5 grid-rows-3 gap-3 md:gap-6";
+      default: return "gap-1 md:gap-2";
     }
+  };
+
+  const beginHold = (index, event) => {
+    if (!onHoldStart || activeHoldPointersRef.current.has(index)) return;
+
+    activeHoldPointersRef.current.add(index);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch (error) {
+      // Pointer capture is optional; pointer up/cancel handlers still clean up.
+    }
+    onHoldStart(index);
+  };
+
+  const finishHold = (index) => {
+    if (!activeHoldPointersRef.current.has(index)) return;
+
+    activeHoldPointersRef.current.delete(index);
+    if (onHoldEnd) onHoldEnd(index);
   };
 
   return (
     <div className={`relative w-full bg-[#181818] border border-white/5 shadow-2xl transition-all ${
       isMiniMode ? 'rounded-2xl p-2' : 'rounded-3xl p-4 md:p-8'
-    } ${getGridClasses()}`}>
+    } ${getGridClasses()}`} style={customGridStyle}>
       {/* Vida detayları (Sadece normal modda) */}
       {!isMiniMode && (
         <>
@@ -81,7 +147,13 @@ export default function DeckGrid({ buttons, gridSize, onTrigger, onEdit, pressed
         </>
       )}
 
-      <div className={`grid h-full ${getInnerGridClasses()}`}>
+      <div
+        className={`grid h-full ${getInnerGridClasses()}`}
+        style={isPresetSize ? undefined : {
+          gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+          gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`
+        }}
+      >
         {Array.from({ length: gridSize }).map((_, i) => {
           const isDynAllowed = buttons[i]?.disableDynamicState !== true && settings?.enableDynamicButtonStates !== false;
           const dynState = isDynAllowed ? getDynamicStateForButton(buttons[i], dynamicButtonStates) : null;
@@ -141,7 +213,29 @@ export default function DeckGrid({ buttons, gridSize, onTrigger, onEdit, pressed
           return (
             <div
               key={i}
-              onClick={() => onTrigger(i)}
+              onClick={() => {
+                if (buttons[i]?.holdMode === true) return;
+                onTrigger(i);
+              }}
+              onPointerDown={(e) => {
+                if (readOnly || buttons[i]?.holdMode !== true || e.button !== 0) return;
+                e.preventDefault();
+                beginHold(i, e);
+              }}
+              onPointerUp={() => {
+                if (buttons[i]?.holdMode === true) finishHold(i);
+              }}
+              onPointerCancel={() => {
+                if (buttons[i]?.holdMode === true) finishHold(i);
+              }}
+              onLostPointerCapture={() => {
+                if (buttons[i]?.holdMode === true) finishHold(i);
+              }}
+              onPointerLeave={(e) => {
+                if (buttons[i]?.holdMode !== true) return;
+                if (e.currentTarget.hasPointerCapture && e.currentTarget.hasPointerCapture(e.pointerId)) return;
+                finishHold(i);
+              }}
               onContextMenu={(e) => { 
                 e.preventDefault(); 
                 if (!readOnly && onEdit) onEdit(i); 

@@ -1,40 +1,43 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import ActionEditor from './components/ActionEditor';
-import useStore from './store/useStore';
+import useStore, { claimHoldBinding, getHoldBindingKey, releaseHoldBinding } from './store/useStore';
 import DeckGrid from './components/DeckGrid';
-import { fileSystem } from './utils/fileSystem';
 
 export default function Home() {
   const { 
     lastMessage, 
     activeTab, 
     isInputRecording, 
-    profileUpdateTrigger,
     connectionStatus,
     sendToEngine,
     settings,
     updateSetting,
-    setProfiles,
+    updateActiveProfile,
+    setToast,
+    profiles: storedProfiles,
     isMiniMode,
     language,
     t,
     lastHandledMsgId,
     markMessageHandled,
-    executeLogicSequence
+    executeLogicSequence,
+    executeHoldRelease
   } = useStore();
   
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [isDeckCustomizerOpen, setIsDeckCustomizerOpen] = useState(false);
+  const [isMoreGridSizesOpen, setIsMoreGridSizesOpen] = useState(false);
   const [selectedButtonIndex, setSelectedButtonIndex] = useState(null);
   const [buttons, setButtons] = useState(Array(15).fill(null));
   const [pressedButtonIndex, setPressedButtonIndex] = useState(null);
   const [gridSize, setGridSize] = useState(15);
-  const [allProfiles, setAllProfiles] = useState([]);
+  const activeProfileIdRef = useRef(null);
   const bgFileInputRef = useRef(null);
 
   const accentColor = settings?.accentColor || '#3b82f6';
+  const additionalGridSizes = [4, 6, 10, 12, 16, 20, 24, 28, 36, 40, 48, 64, 80, 96, 100, 120, 128, 144, 160, 192, 256];
 
   // Butonların güncel halini ref içinde tut (Stale closure önlemek için)
   const buttonsRef = useRef(buttons);
@@ -45,32 +48,36 @@ export default function Home() {
   // Aynı mesajı tekrar işlememek için ref
   const processedMessageRef = useRef(null);
 
-  // --- 1. PROFİLLERİ YÜKLE ---
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        const content = await fileSystem.readFile('profiles.json');
-        if (content) {
-          const profiles = JSON.parse(content);
-          setAllProfiles(profiles);
-          if (profiles && profiles.length > 0) {
-            const activeProfile = profiles.find(p => p.isActive) || profiles[0];
-            let loadedButtons = activeProfile.buttons || Array(15).fill(null);
-            let loadedGridSize = activeProfile.gridSize || 15;
+  // Keep the deck attached to the active profile in the shared store.
+  useLayoutEffect(() => {
+    if (storedProfiles.length === 0) return;
+    const activeProfile = storedProfiles.find(profile => profile.isActive) || storedProfiles[0];
+    const profileButtons = activeProfile.buttons || [];
+    const profileGridSize = activeProfile.gridSize || 15;
+    const loadedButtons = profileButtons.length < profileGridSize
+      ? [...profileButtons, ...Array(profileGridSize - profileButtons.length).fill(null)]
+      : profileButtons;
 
-            if (loadedButtons.length < loadedGridSize) {
-              loadedButtons = [...loadedButtons, ...Array(loadedGridSize - loadedButtons.length).fill(null)];
-            }
-            setButtons(loadedButtons);
-            setGridSize(loadedGridSize);
-          }
-        }
-      } catch (e) {
-        console.error("Profil yüklenirken hata:", e);
-      }
-    };
-    loadData();
-  }, [profileUpdateTrigger]);
+    activeProfileIdRef.current = activeProfile.id;
+    buttonsRef.current = loadedButtons;
+    setButtons(loadedButtons);
+    setGridSize(profileGridSize);
+  }, [storedProfiles]);
+
+  const persistActiveProfileChanges = async (profileId, changes) => {
+    await updateActiveProfile(profileId, changes);
+  };
+
+  const reportProfileSaveError = (error) => {
+    console.error('Deck profile save error:', error);
+    setToast({
+      title: language === 'tr' ? 'Profil Kaydedilemedi' : 'Profile Could Not Be Saved',
+      message: language === 'tr'
+        ? 'Profil değişmiş olabilir. Deck yeniden yüklenmeden tekrar deneyin.'
+        : 'The active profile may have changed. Please retry after the deck refreshes.',
+      variant: 'error'
+    });
+  };
 
   // Ses Çalma Yardımcısı (Buton özel sesi veya genel ayar sesi)
   const playButtonAudio = (btn) => {
@@ -93,102 +100,134 @@ export default function Home() {
 
   // --- 3. WEBSOCKET DİNLEYİCİSİ (INPUTLARI YAKALAR) ---
   useEffect(() => {
-    if (isInputRecording) return; // Kayıt modundaysa işlem yapma
+    if (activeTab !== 'deck') return;
+    if (!lastMessage) return;
+    // Keep processing releases while recording so a held action can always be restored.
+    if (isInputRecording && lastMessage.type !== 'inputReleased') return;
 
-    if (lastMessage && lastMessage.type === 'inputPressed') {
-      const msgId = lastMessage._msgId;
-      // Mükerrer işlem kontrolü (global ve yerel)
-      if (msgId && (msgId === lastHandledMsgId || msgId === processedMessageRef.current)) return;
-      if (msgId) {
-        processedMessageRef.current = msgId;
-        markMessageHandled(msgId);
-      }
-      
-      const currentButtons = buttonsRef.current;
+    const currentButtons = buttonsRef.current;
 
-      const matchDetails = currentButtons.map((btn, index) => {
+    const findButtonIndex = (message) => {
+      const matches = currentButtons.map((btn, index) => {
         if (!btn || !btn.binding) return null;
-        
-        // Tuş ve HID karşılaştırması
+
         const btnKey = String(btn.binding.key);
-        const msgKey = String(lastMessage.key);
-        
+        const msgKey = String(message.key);
         if (btnKey !== msgKey) return null;
 
-        // HID eşleşmesi: Generic hook veya boş ise doğrudan eşleşir
         let isHidMatch = true;
-        if (btn.binding.hid && lastMessage.hid) {
-            const bHid = String(btn.binding.hid);
-            const mHid = String(lastMessage.hid);
-            isHidMatch = (bHid === mHid) || 
-                         (bHid.includes(mHid) || mHid.includes(bHid)) ||
-                         (bHid === 'any' || mHid === 'any');
+        if (btn.binding.hid && message.hid) {
+          const bHid = String(btn.binding.hid);
+          const mHid = String(message.hid);
+          isHidMatch = (bHid === mHid) ||
+            (bHid.includes(mHid) || mHid.includes(bHid)) ||
+            (bHid === 'any' || mHid === 'any');
         }
 
         return isHidMatch ? index : null;
       });
 
-      const btnIndex = matchDetails.find(idx => idx !== null);
+      const match = matches.find(idx => idx !== null);
+      return match === undefined ? null : match;
+    };
 
-      if (btnIndex !== undefined && btnIndex !== null) {
-        console.log(`✅ [EŞLEŞME] Buton ${btnIndex} çalışıyor!`);
-        
-        // A) Görsel Efekt
+    const claimMessage = () => {
+      const msgId = lastMessage._msgId;
+      if (msgId && (msgId === lastHandledMsgId || msgId === processedMessageRef.current)) return false;
+      if (msgId) {
+        processedMessageRef.current = msgId;
+        markMessageHandled(msgId);
+      }
+      return true;
+    };
+
+    if (lastMessage.type === 'inputPressed') {
+      if (!claimMessage()) return;
+
+      const btnIndex = findButtonIndex(lastMessage);
+      if (btnIndex === null) return;
+
+      const button = currentButtons[btnIndex];
+      if (!button) return;
+
+      if (button.holdMode === true) {
+        const holdKey = getHoldBindingKey(lastMessage);
+        if (!claimHoldBinding(holdKey)) return; // Ignore key auto-repeat.
+
         setPressedButtonIndex(btnIndex);
-        setTimeout(() => setPressedButtonIndex(null), 150);
+        playButtonAudio(button);
 
-        // B) KOMUTU ATEŞLE
-        const button = currentButtons[btnIndex];
-        if (button) {
-            playButtonAudio(button);
-
-            // Mantık ve Değişken Motorunu Çalıştır
-            if (button.actions && button.actions.length > 0 && executeLogicSequence) {
-              executeLogicSequence(button.actions);
-            } else {
-              const payload = {
-                  type: 'EXECUTE_ACTION',
-                  buttonIndex: btnIndex,
-                  actionData: {
-                      label: button.label,
-                      actions: button.actions || [],
-                      binding: button.binding
-                  },
-                  timestamp: Date.now()
-              };
-              console.log("[PAGE] Aksiyon gönderiliyor:", payload);
-              sendToEngine(payload);
-            }
+        if (button.actions && button.actions.length > 0 && executeLogicSequence) {
+          executeLogicSequence(button.actions, { phase: 'press' });
         }
+        return;
+      }
+
+      console.log(`[MATCH] Button ${btnIndex} triggered.`);
+
+      // A) Visual feedback
+      setPressedButtonIndex(btnIndex);
+      setTimeout(() => setPressedButtonIndex(null), 150);
+
+      // B) Execute the action
+      playButtonAudio(button);
+
+      if (button.actions && button.actions.length > 0 && executeLogicSequence) {
+        executeLogicSequence(button.actions);
+      } else {
+        const payload = {
+          type: 'EXECUTE_ACTION',
+          buttonIndex: btnIndex,
+          actionData: {
+            label: button.label,
+            actions: button.actions || [],
+            binding: button.binding
+          },
+          timestamp: Date.now()
+        };
+        console.log("[PAGE] Sending action:", payload);
+        sendToEngine(payload);
+      }
+      return;
+    }
+
+    if (lastMessage.type === 'inputReleased') {
+      if (!claimMessage()) return;
+
+      // Only undo a press that this session actually claimed. Without this
+      // guard a release event without a matching press could toggle mute back.
+      if (!releaseHoldBinding(getHoldBindingKey(lastMessage))) return;
+
+      const btnIndex = findButtonIndex(lastMessage);
+      if (btnIndex === null) return;
+
+      const button = currentButtons[btnIndex];
+      if (!button || button.holdMode !== true) return;
+
+      setPressedButtonIndex(null);
+
+      if (button.actions && button.actions.length > 0 && executeHoldRelease) {
+        executeHoldRelease(button.actions);
       }
     }
-  }, [lastMessage, isInputRecording, sendToEngine, lastHandledMsgId, markMessageHandled, executeLogicSequence]);
+  }, [activeTab, lastMessage, isInputRecording, sendToEngine, lastHandledMsgId, markMessageHandled, executeLogicSequence, executeHoldRelease]);
 
   const changeGridSize = async (size) => {
-    setGridSize(size);
     let newButtons = [...buttons];
     if (size > newButtons.length) {
       newButtons = [...newButtons, ...Array(size - newButtons.length).fill(null)];
-      setButtons(newButtons);
     }
 
     try {
-      const content = await fileSystem.readFile('profiles.json');
-      const profiles = content ? JSON.parse(content) : [];
-      if (profiles.length > 0) {
-        const activeIndex = profiles.findIndex(p => p.isActive);
-        if (activeIndex !== -1) {
-          profiles[activeIndex].gridSize = size;
-          profiles[activeIndex].buttons = newButtons;
-        } else {
-          profiles[0].gridSize = size;
-          profiles[0].buttons = newButtons;
-        }
-        await fileSystem.writeFile('profiles.json', profiles);
-        setProfiles(profiles);
-      }
+      await persistActiveProfileChanges(activeProfileIdRef.current, {
+        gridSize: size,
+        buttons: newButtons
+      });
+      setGridSize(size);
+      setButtons(newButtons);
     } catch (e) {
-      console.error("Grid size save error:", e);
+      reportProfileSaveError(e);
+      return;
     }
 
     // Grid boyutu değişince de backend'i güncelle (Eksik olan parça)
@@ -203,6 +242,8 @@ export default function Home() {
   const triggerButton = (index) => {
     const button = buttons[index];
     if (!button) return;
+    // Hold-mode buttons are driven by pointer down/up instead of click.
+    if (button.holdMode === true) return;
 
     setPressedButtonIndex(index);
     setTimeout(() => setPressedButtonIndex(null), 150);
@@ -224,8 +265,37 @@ export default function Home() {
         timestamp: Date.now()
       };
       
-      console.log("[PAGE] Aksiyon gönderiliyor:", payload);
+      console.log("[PAGE] Sending action:", payload);
       sendToEngine(payload);
+    }
+  };
+
+  const startHoldButton = (index) => {
+    const button = buttonsRef.current[index];
+    if (!button || button.holdMode !== true) return;
+
+    const holdKey = `mouse::${index}`;
+    if (!claimHoldBinding(holdKey)) return;
+
+    setPressedButtonIndex(index);
+    playButtonAudio(button);
+
+    if (button.actions && button.actions.length > 0 && executeLogicSequence) {
+      executeLogicSequence(button.actions, { phase: 'press' });
+    }
+  };
+
+  const endHoldButton = (index) => {
+    const button = buttonsRef.current[index];
+    const holdKey = `mouse::${index}`;
+    const wasHeld = releaseHoldBinding(holdKey);
+
+    if (!wasHeld || !button || button.holdMode !== true) return;
+
+    setPressedButtonIndex(null);
+
+    if (button.actions && button.actions.length > 0 && executeHoldRelease) {
+      executeHoldRelease(button.actions);
     }
   };
 
@@ -235,31 +305,19 @@ export default function Home() {
   };
 
   const handleSave = async (buttonData) => {
+    const profileId = activeProfileIdRef.current;
     const newButtons = [...buttons];
     if (buttonData === null) {
       newButtons[selectedButtonIndex] = null;
     } else {
       newButtons[selectedButtonIndex] = buttonData;
     }
-    setButtons(newButtons);
-    
     try {
-      const content = await fileSystem.readFile('profiles.json');
-      const profiles = content ? JSON.parse(content) : [];
-      if (profiles.length > 0) {
-        const activeIndex = profiles.findIndex(p => p.isActive);
-        if (activeIndex !== -1) {
-          profiles[activeIndex].buttons = newButtons;
-          profiles[activeIndex].gridSize = gridSize;
-        } else {
-          profiles[0].buttons = newButtons;
-          profiles[0].gridSize = gridSize;
-        }
-        await fileSystem.writeFile('profiles.json', profiles);
-        setProfiles(profiles);
-      }
+      await persistActiveProfileChanges(profileId, { buttons: newButtons, gridSize });
+      setButtons(newButtons);
     } catch (e) {
-      console.error("Profile save error:", e);
+      reportProfileSaveError(e);
+      return;
     }
 
     // Block Listesini Güncelle (Kayıt sırasında da gönderiyoruz ki güncel kalsın)
@@ -277,23 +335,16 @@ export default function Home() {
   };
 
   const handleStealBinding = async (indexToClear) => {
+    const profileId = activeProfileIdRef.current;
     const newButtons = [...buttons];
     if (newButtons[indexToClear]) {
       newButtons[indexToClear] = { ...newButtons[indexToClear], binding: null };
-      setButtons(newButtons);
-      
       try {
-        const content = await fileSystem.readFile('profiles.json');
-        const profiles = content ? JSON.parse(content) : [];
-        if (profiles.length > 0) {
-           const activeIndex = profiles.findIndex(p => p.isActive);
-           if (activeIndex !== -1) profiles[activeIndex].buttons = newButtons;
-           else profiles[0].buttons = newButtons;
-           await fileSystem.writeFile('profiles.json', profiles);
-           setProfiles(profiles);
-        }
+        await persistActiveProfileChanges(profileId, { buttons: newButtons });
+        setButtons(newButtons);
       } catch (e) {
-        console.error("Steal binding save error:", e);
+        reportProfileSaveError(e);
+        return;
       }
       
       const blocks = newButtons.filter(btn => btn?.binding?.hid && btn?.binding?.key)
@@ -353,7 +404,7 @@ export default function Home() {
       
       {activeTab === 'deck' && (
         <div className={`flex flex-col items-center ${isMiniMode ? 'gap-2' : 'gap-5'} w-full relative z-10`}>
-          <div className="flex items-center gap-2">
+          <div className="relative z-20 flex items-center gap-2">
             {/* Minimal Grid Boyut & Görünüm Barı */}
             <div className={`flex items-center bg-[#161616]/80 backdrop-blur-md ${isMiniMode ? 'p-0.5 rounded-lg' : 'p-1 rounded-xl'} border border-white/10 shadow-xl gap-0.5`}>
               {[8, 15, 32].map((size) => (
@@ -373,6 +424,51 @@ export default function Home() {
 
               {!isMiniMode && (
                 <>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setIsMoreGridSizesOpen(open => !open)}
+                      className={`px-2 py-1.5 rounded-lg text-sm leading-none transition-all cursor-pointer ${
+                        additionalGridSizes.includes(gridSize)
+                          ? 'text-white bg-white/10'
+                          : 'text-zinc-400 hover:text-white hover:bg-white/5'
+                      }`}
+                      title={language === 'tr' ? 'Daha fazla tuş sayısı' : 'More key counts'}
+                      aria-label={language === 'tr' ? 'Daha fazla tuş sayısı' : 'More key counts'}
+                      aria-haspopup="menu"
+                      aria-expanded={isMoreGridSizesOpen}
+                    >
+                      ···
+                    </button>
+                    {isMoreGridSizesOpen && (
+                      <div
+                        role="menu"
+                        aria-label={language === 'tr' ? 'Tuş sayısı seçenekleri' : 'Key count options'}
+                        className="absolute left-1/2 top-full z-[100] mt-2 grid w-40 -translate-x-1/2 grid-cols-3 gap-1 rounded-xl border border-white/10 bg-[#1a1a1f] p-2 shadow-2xl"
+                      >
+                        {additionalGridSizes.map(size => (
+                          <button
+                            key={size}
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={gridSize === size}
+                            onClick={() => {
+                              changeGridSize(size);
+                              setIsMoreGridSizesOpen(false);
+                            }}
+                            className={`rounded-lg px-2 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
+                              gridSize === size
+                                ? 'text-white'
+                                : 'text-zinc-400 hover:bg-white/5 hover:text-white'
+                            }`}
+                            style={gridSize === size ? { backgroundColor: accentColor } : {}}
+                          >
+                            {size}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <div className="w-px h-4 bg-white/10 mx-1" />
                   <button
                     onClick={() => setIsDeckCustomizerOpen(true)}
@@ -392,6 +488,8 @@ export default function Home() {
             gridSize={gridSize} 
             onTrigger={triggerButton} 
             onEdit={handleEditButton} 
+            onHoldStart={startHoldButton}
+            onHoldEnd={endHoldButton}
             pressedButtonIndex={pressedButtonIndex}
             readOnly={false}
           />
@@ -553,7 +651,7 @@ export default function Home() {
         onSave={handleSave}
         existingButtons={buttons}
         onStealBinding={handleStealBinding}
-        profiles={allProfiles}
+        profiles={storedProfiles}
       />
     </main>
   );

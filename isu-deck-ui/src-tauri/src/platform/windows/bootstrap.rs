@@ -4,12 +4,10 @@ use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, GetCurrentThread, GetExitCodeProcess, SetPriorityClass, SetThreadPriority,
     WaitForSingleObject, HIGH_PRIORITY_CLASS, INFINITE, THREAD_PRIORITY_TIME_CRITICAL,
 };
-use windows_sys::Win32::UI::Shell::{
-    ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
-};
+use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
-pub static EMBEDDED_INTERCEPTION_DLL: &[u8] = include_bytes!("../../../engine/interception.dll");
+pub static EMBEDDED_INTERCEPTION_DLL: &[u8] = include_bytes!("../../../../../interception.dll");
 pub static EMBEDDED_INSTALLER: &[u8] = include_bytes!("../../../drivers/install-interception.exe");
 
 pub const INSTALL_HELPER_CMD: &str = "@echo off\r\n\
@@ -37,15 +35,26 @@ exit /b 1\r\n\
 exit /b %ERRORLEVEL%\r\n";
 
 pub fn find_driver_installer(root: &Path, action: &str) -> Option<(PathBuf, String)> {
-    let flag = if action == "install" { "/install" } else { "/uninstall" };
+    let flag = if action == "install" {
+        "/install"
+    } else {
+        "/uninstall"
+    };
     let helper = root.join("drivers").join("install_helper.cmd");
     if helper.exists() {
-        return Some((PathBuf::from("cmd.exe"), format!("/c \"{}\" {}", helper.display(), flag)));
+        return Some((
+            PathBuf::from("cmd.exe"),
+            format!("/c \"{}\" {}", helper.display(), flag),
+        ));
     }
     let p1 = root.join("drivers").join("install-interception.exe");
-    if p1.exists() { return Some((p1, flag.to_string())); }
+    if p1.exists() {
+        return Some((p1, flag.to_string()));
+    }
     let p2 = root.join("install-interception.exe");
-    if p2.exists() { return Some((p2, flag.to_string())); }
+    if p2.exists() {
+        return Some((p2, flag.to_string()));
+    }
     None
 }
 
@@ -80,10 +89,12 @@ pub fn check_registry_has_interception() -> bool {
         RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ,
     };
 
-    let subkey: Vec<u16> = std::ffi::OsStr::new("SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e96b-e325-11ce-bfc1-08002be10318}")
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
+    let subkey: Vec<u16> = std::ffi::OsStr::new(
+        "SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e96b-e325-11ce-bfc1-08002be10318}",
+    )
+    .encode_wide()
+    .chain(std::iter::once(0))
+    .collect();
 
     let val_name: Vec<u16> = std::ffi::OsStr::new("UpperFilters")
         .encode_wide()
@@ -91,15 +102,7 @@ pub fn check_registry_has_interception() -> bool {
         .collect();
 
     let mut hkey: HKEY = std::ptr::null_mut();
-    let res = unsafe {
-        RegOpenKeyExW(
-            HKEY_LOCAL_MACHINE,
-            subkey.as_ptr(),
-            0,
-            KEY_READ,
-            &mut hkey,
-        )
-    };
+    let res = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, subkey.as_ptr(), 0, KEY_READ, &mut hkey) };
 
     if res != 0 || hkey.is_null() {
         return false;
@@ -168,7 +171,9 @@ pub fn run_silent_elevated(exe_path: &Path, args: &str) -> Result<bool, String> 
 
     let ok = unsafe { ShellExecuteExW(&mut exec_info) };
     if ok == FALSE || exec_info.hProcess.is_null() {
-        return Err("Kullanıcı yönetici onayını (UAC) iptal etti veya işlem başlatılamadı.".to_string());
+        return Err(
+            "Kullanıcı yönetici onayını (UAC) iptal etti veya işlem başlatılamadı.".to_string(),
+        );
     }
 
     let h_proc = exec_info.hProcess;

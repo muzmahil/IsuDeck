@@ -1,34 +1,13 @@
-# IsuDeck Release Packaging Script
+# Copies the portable Windows build to the repository root.
 $ErrorActionPreference = "Stop"
 
-$ProjectRoot = "C:\IsuDeck"
-$OutputDir = Join-Path $ProjectRoot "release_package"
-$ZipFile = Join-Path $ProjectRoot "IsuDeck_Portable_v1.0.0.zip"
+$ProjectRoot = $PSScriptRoot
+$BuiltExe = Join-Path $ProjectRoot "isu-deck-ui\src-tauri\target\release\app.exe"
+$OutputExe = Join-Path $ProjectRoot "IsuDeck.exe"
 
-Write-Host "Creating IsuDeck Release Package..." -ForegroundColor Cyan
-
-if (Test-Path $OutputDir) {
-    Remove-Item -Path $OutputDir -Recurse -Force
-}
-if (Test-Path $ZipFile) {
-    Remove-Item -Path $ZipFile -Force
+if (-not (Test-Path -LiteralPath $BuiltExe -PathType Leaf)) {
+    throw "Portable build not found at '$BuiltExe'. Build it with 'npm run tauri build' first."
 }
 
-New-Item -ItemType Directory -Path $OutputDir | Out-Null
-
-Copy-Item -Path (Join-Path $ProjectRoot "IsuDeck.exe") -Destination $OutputDir -Force
-Copy-Item -Path (Join-Path $ProjectRoot "interception.dll") -Destination $OutputDir -Force
-Copy-Item -Path (Join-Path $ProjectRoot "LICENSE") -Destination $OutputDir -Force
-Copy-Item -Path (Join-Path $ProjectRoot "LICENSE.md") -Destination $OutputDir -Force
-Copy-Item -Path (Join-Path $ProjectRoot "README.md") -Destination $OutputDir -Force
-Copy-Item -Path (Join-Path $ProjectRoot "USER_GUIDE.md") -Destination $OutputDir -Force
-Copy-Item -Path (Join-Path $ProjectRoot "PLUGIN_SDK.md") -Destination $OutputDir -Force
-
-Copy-Item -Path (Join-Path $ProjectRoot "drivers") -Destination $OutputDir -Recurse -Force
-Copy-Item -Path (Join-Path $ProjectRoot "plugins") -Destination $OutputDir -Recurse -Force
-Copy-Item -Path (Join-Path $ProjectRoot "sounds") -Destination $OutputDir -Recurse -Force
-
-Write-Host "Compressing into $ZipFile..." -ForegroundColor Cyan
-Compress-Archive -Path "$OutputDir\*" -DestinationPath $ZipFile -CompressionLevel Optimal
-
-Write-Host "Release Package Successfully Created at: $ZipFile" -ForegroundColor Green
+Copy-Item -LiteralPath $BuiltExe -Destination $OutputExe -Force
+Write-Host "Portable IsuDeck executable created at: $OutputExe" -ForegroundColor Green

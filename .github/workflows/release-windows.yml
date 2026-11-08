@@ -1,0 +1,60 @@
+name: Build Windows Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: isu-deck-ui/package-lock.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Verify release tag version
+        working-directory: isu-deck-ui
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          if ($env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Release tag $env:GITHUB_REF_NAME must match package version v$version."
+          }
+
+      - name: Install frontend dependencies
+        working-directory: isu-deck-ui
+        run: npm ci
+
+      - name: Build portable executable
+        working-directory: isu-deck-ui
+        run: npm run tauri build -- --no-bundle
+
+      - name: Prepare release executable
+        shell: pwsh
+        run: ./create_release_package.ps1
+
+      - name: Publish portable executable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          gh release create $env:GITHUB_REF_NAME .\IsuDeck.exe `
+            --draft `
+            --title "IsuDeck $env:GITHUB_REF_NAME" `
+            --notes-file RELEASE_NOTES.md
