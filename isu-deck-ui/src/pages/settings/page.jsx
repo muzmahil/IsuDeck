@@ -19,7 +19,7 @@ export default function SettingsPage() {
     setUpdatePromptOpen
   } = useStore();
 
-  const [currentVersion, setCurrentVersion] = useState('1.2.0');
+  const [currentVersion, setCurrentVersion] = useState('1.2.1');
   const [platform, setPlatform] = useState('windows');
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [updateModalOpen, setUpdateModalOpen] = useState(false);

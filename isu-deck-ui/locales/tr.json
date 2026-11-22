@@ -102,6 +102,7 @@
       "remove_other": "Diğer Atamayı Kaldır",
       "handler_id": "İşleyici ID",
       "hid_path": "Cihaz HID Yolu",
+    "details": "Teknik Detaylar",
       "hold_mode": "Basılı Tutma Modu",
       "hold_mode_desc": "Basıldığında çalıştır, bırakıldığında geri al. Tuş tekrarı yok sayılır."
     },

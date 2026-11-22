@@ -4,6 +4,7 @@ import SplashScreen from './SplashScreen';
 import DisclaimerModal from './DisclaimerModal';
 import useStore, { claimHoldBinding, getHoldBindingKey, releaseHoldBinding } from '../store/useStore';
 import { fileSystem } from '../utils/fileSystem';
+import { findButtonIndexByBinding } from '../utils/bindingMatch';
 
 export default function ClientLayout({ children }) {
   const [isReady, setIsReady] = useState(false);
@@ -22,6 +23,8 @@ export default function ClientLayout({ children }) {
     startListener, // <--- Store'dan çekiyoruz
     loadSettings,  // <--- Ayarları yüklemek için
     loadProfiles,  // <--- RAM cache profilleri yüklemek için
+    loadVariables, // <--- variables.json kalıcılığı
+    refreshSystemMetrics, // <--- $sys.* metrikleri
     profiles,
     isMiniMode,
     checkDriver,
@@ -70,6 +73,7 @@ export default function ClientLayout({ children }) {
     // Ayarları ve Profilleri Yükle (RAM Cache)
     loadSettings();
     loadProfiles();
+    loadVariables();
 
     // 1️⃣ LISTENER BAŞLAT
     let unlisten;
@@ -83,7 +87,19 @@ export default function ClientLayout({ children }) {
     return () => {
         if (unlisten) unlisten();
     };
-  }, [isReady, setLanguage, sendToEngine, startListener, loadSettings, loadProfiles]);
+  }, [isReady, setLanguage, sendToEngine, startListener, loadSettings, loadProfiles, loadVariables]);
+
+  // Sistem metriklerini ($sys.cpu, $sys.ram, $sys.battery, saat) güncel tut.
+  useEffect(() => {
+    if (!isReady) return undefined;
+
+    refreshSystemMetrics();
+    const interval = setInterval(() => {
+      refreshSystemMetrics();
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [isReady, refreshSystemMetrics]);
 
   // Tema & Vurgu Rengi Senkronizasyonu
   useEffect(() => {
@@ -217,12 +233,10 @@ export default function ClientLayout({ children }) {
             if (blocks.length > 0) {
               const initPayload = { type: "init_block_list", blocks: blocks };
               sendToEngine(initPayload);
-              console.log('📤 Blok listesi gönderildi.');
 
               // Garanti olsun diye 1 saniye sonra tekrar gönder (Cold start fix)
               setTimeout(() => {
                 sendToEngine(initPayload);
-                console.log('📤 Blok listesi tekrar gönderildi (Retry).');
               }, 1000);
             }
           }
@@ -245,28 +259,9 @@ export default function ClientLayout({ children }) {
 
       const activeProfile = currentProfiles.find(p => p.isActive) || currentProfiles[0];
       const buttons = activeProfile?.buttons || [];
+      const matchIndex = findButtonIndexByBinding(buttons, message);
 
-      const matchIndex = buttons.findIndex(btn => {
-        if (!btn?.binding) return false;
-
-        const btnKey = String(btn.binding.key);
-        const msgKey = String(message.key);
-
-        if (btnKey !== msgKey) return false;
-
-        let isHidMatch = true;
-        if (btn.binding.hid && message.hid) {
-          const bHid = String(btn.binding.hid);
-          const mHid = String(message.hid);
-          if (bHid !== 'KEYBOARD_HOOK' && mHid !== 'KEYBOARD_HOOK' && bHid !== '*' && mHid !== '*') {
-            isHidMatch = (bHid === mHid);
-          }
-        }
-
-        return isHidMatch;
-      });
-
-      if (matchIndex === -1) return null;
+      if (matchIndex === null || matchIndex === -1) return null;
       return { button: buttons[matchIndex], index: matchIndex };
     };
 

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 // import { motion } from 'framer-motion'; 
 import { fileSystem } from '../utils/fileSystem';
 import useStore from '../store/useStore';
+import { getAppVersion } from '../utils/updater';
 // Tauri v2 Window API (Kapatma butonu için static import daha temizdir)
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
@@ -20,8 +21,12 @@ export default function SplashScreen({ onReady }) {
   const [status, setStatus] = useState(isTr ? 'Sistem başlatılıyor...' : 'Starting system...');
   const [progress, setProgress] = useState(0);
   const [isError, setIsError] = useState(false);
+  const [appVersion, setAppVersion] = useState('1.2.1');
 
   useEffect(() => {
+    getAppVersion().then((v) => {
+      if (v) setAppVersion(v);
+    }).catch(() => {});
     // Helper: runs a promise with a timeout, resolves to fallback on timeout
     const withTimeout = (promise, ms, fallback) =>
       Promise.race([
@@ -111,7 +116,7 @@ export default function SplashScreen({ onReady }) {
           <h1 className="text-3xl font-bold tracking-tight mb-1">
             Isu<span style={{ color: accentColor }}>Deck</span>
           </h1>
-          <p className="text-zinc-400 text-xs font-medium">v1.2.0</p>
+          <p className="text-zinc-400 text-xs font-medium">v{appVersion}</p>
           <p className="text-zinc-500 text-[11px] font-medium mb-8">IsuDeck by rootcf • GNU GPL v3</p>
 
           {/* Progress Bar */}

@@ -102,6 +102,7 @@
       "remove_other": "Remove Other Assignment",
       "handler_id": "Handler ID",
       "hid_path": "Device HID Path",
+    "details": "Technical Details",
       "hold_mode": "Hold Mode",
       "hold_mode_desc": "Press once, undo on release. Key repeat is ignored."
     },

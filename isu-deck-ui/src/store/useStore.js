@@ -3,6 +3,18 @@ import { dictionary } from '../utils/dictionary';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { fileSystem } from '../utils/fileSystem';
+import {
+  changeVariableInList,
+  executeLogicSequence as runLogicSequence,
+  setVariableInList
+} from '../utils/logicEngine';
+import {
+  STATIC_ACTION_KEYS,
+  collectHoldReleaseActions,
+  isHoldReleaseAction
+} from '../utils/holdRelease';
+
+export { isHoldReleaseAction } from '../utils/holdRelease';
 
 let profileWriteQueue = Promise.resolve();
 
@@ -139,38 +151,28 @@ const useStore = create((set, get) => ({
   },
 
   setVariableValue: (name, val) => set((state) => {
-    const updated = state.variables.map(v => {
-      if (v.name.toLowerCase() === name.toLowerCase()) {
-        const parsedVal = v.type === 'number' ? Number(val) : (v.type === 'boolean' ? Boolean(val) : String(val));
-        return { ...v, value: parsedVal };
-      }
-      return v;
-    });
+    const updated = setVariableInList(state.variables, name, val);
     fileSystem.writeFile('variables.json', updated).catch(() => {});
     return { variables: updated };
   }),
 
   changeVariableValue: (name, delta, min, max, syncSystemVolume) => set((state) => {
-    let newCalculatedVal = null;
-    const updated = state.variables.map(v => {
-      if (v.name.toLowerCase() === name.toLowerCase()) {
-        const curNum = Number(v.value || 0);
-        let nextVal = curNum + delta;
-        const minClamp = min !== undefined ? min : v.min;
-        const maxClamp = max !== undefined ? max : v.max;
-        if (minClamp !== undefined && minClamp !== null) nextVal = Math.max(minClamp, nextVal);
-        if (maxClamp !== undefined && maxClamp !== null) nextVal = Math.min(maxClamp, nextVal);
-        newCalculatedVal = nextVal;
-        return { ...v, value: nextVal };
-      }
-      return v;
-    });
+    const { variables: updated, value } = changeVariableInList(
+      state.variables,
+      name,
+      delta,
+      min,
+      max
+    );
 
     fileSystem.writeFile('variables.json', updated).catch(() => {});
 
-    if (syncSystemVolume && newCalculatedVal !== null) {
-      const { sendToEngine } = get();
-      sendToEngine({ type: 'SET_SYSTEM_VOLUME', percent: newCalculatedVal });
+    if (syncSystemVolume && value !== null) {
+      state.sendToEngine({ type: 'SET_SYSTEM_VOLUME', percent: value });
+      return {
+        variables: updated,
+        systemMetrics: { ...state.systemMetrics, volume: value }
+      };
     }
 
     return { variables: updated };
@@ -180,176 +182,79 @@ const useStore = create((set, get) => ({
     systemMetrics: { ...state.systemMetrics, ...partial }
   })),
 
-  executeLogicSequence: async (actions, options = {}) => {
-    if (!actions || !Array.isArray(actions)) return;
-    const { variables, setVariableValue, changeVariableValue, systemMetrics, sendToEngine } = get();
-    const executionPhase = options?.phase;
-
-    const buildEngineAction = (act) => executionPhase ? { ...act, phase: executionPhase } : act;
-
-    const evaluateValue = (valStr) => {
-      if (valStr === undefined || valStr === null) return '';
-      const trimmed = String(valStr).trim();
-      if (trimmed.startsWith('$sys.')) {
-        const metricKey = trimmed.slice(5);
-        return systemMetrics[metricKey] !== undefined ? systemMetrics[metricKey] : '';
-      }
-      const cleanVar = trimmed.startsWith('$') ? trimmed.slice(1) : trimmed;
-      const matchingVar = variables.find(v => v.name.toLowerCase() === cleanVar.toLowerCase() || v.name.toLowerCase() === trimmed.toLowerCase());
-      if (matchingVar) {
-        return matchingVar.value;
-      }
-      if (!isNaN(trimmed) && trimmed !== '') {
-        return Number(trimmed);
-      }
-      if (trimmed.toLowerCase() === 'true') return true;
-      if (trimmed.toLowerCase() === 'false') return false;
-      return trimmed;
+  /**
+   * Refresh clock/battery metrics and, when the native engine exposes
+   * `get_system_metrics`, CPU/RAM usage as well.
+   */
+  refreshSystemMetrics: async (partial = {}) => {
+    const now = new Date();
+    const pad = (value) => String(value).padStart(2, '0');
+    const next = {
+      time24: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
+      time12: now.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      }),
+      ...partial
     };
 
-    const evaluateCondition = (left, op, right) => {
-      const lVal = evaluateValue(left);
-      const rVal = evaluateValue(right);
-      const lNum = Number(lVal);
-      const rNum = Number(rVal);
-      const bothNumbers = !isNaN(lNum) && !isNaN(rNum) && lVal !== '' && rVal !== '';
-
-      switch (op) {
-        case '==':
-        case '=':
-          return String(lVal).toLowerCase() === String(rVal).toLowerCase();
-        case '!=':
-          return String(lVal).toLowerCase() !== String(rVal).toLowerCase();
-        case '>':
-          return bothNumbers ? lNum > rNum : String(lVal) > String(rVal);
-        case '<':
-          return bothNumbers ? lNum < rNum : String(lVal) < String(rVal);
-        case '>=':
-          return bothNumbers ? lNum >= rNum : String(lVal) >= String(rVal);
-        case '<=':
-          return bothNumbers ? lNum <= rNum : String(lVal) <= String(rVal);
-        case 'contains':
-          return String(lVal).toLowerCase().includes(String(rVal).toLowerCase());
-        default:
-          return Boolean(lVal);
-      }
-    };
-
-    const executeActionList = async (list) => {
-      if (!list || !Array.isArray(list)) return;
-      for (const act of list) {
-        if (!act) continue;
-        const type = act.definitionId || act.type;
-        const normalizedType = String(type || '').toUpperCase();
-
-        if (type === 'SET_VARIABLE') {
-          const varName = act.variableName || act.varName;
-          if (varName) {
-            const val = evaluateValue(act.value);
-            setVariableValue(varName, val);
-          }
-        } else if (type === 'CHANGE_VARIABLE') {
-          const varName = act.variableName || act.varName;
-          const op = act.operation || 'subtract';
-          let amount = Number(act.amount !== undefined && act.amount !== '' ? act.amount : 10);
-          if (op === 'subtract') amount = -amount;
-          const min = act.min !== undefined && act.min !== '' ? Number(act.min) : undefined;
-          const max = act.max !== undefined && act.max !== '' ? Number(act.max) : undefined;
-          const syncVolume = !!act.syncSystemVolume;
-          if (varName) {
-            changeVariableValue(varName, amount, min, max, syncVolume);
-          }
-        } else if (type === 'SET_SYSTEM_VOLUME') {
-          const percent = Number(evaluateValue(act.percent ?? 50));
-          sendToEngine({ type: 'SET_SYSTEM_VOLUME', percent });
-        } else if (type === 'ADJUST_SYSTEM_VOLUME') {
-          const delta = Number(act.delta || -10);
-          const matchingVol = variables.find(v => v.name.toLowerCase() === 'vol');
-          if (matchingVol) {
-            changeVariableValue('vol', delta, 0, 100, true);
-          } else {
-            sendToEngine({ type: 'EXECUTE_ACTION', actionData: { actions: [buildEngineAction(act)] } });
-          }
-        } else if (type === 'IF_CONDITION') {
-          const isMet = evaluateCondition(act.leftOperand, act.operator || '==', act.rightOperand);
-          if (isMet) {
-            if (act.thenActions && Array.isArray(act.thenActions) && act.thenActions.length > 0) {
-              await executeActionList(act.thenActions);
-            } else if (act.thenActionType) {
-              await executeActionList([{ type: act.thenActionType, definitionId: act.thenActionType, key: act.thenArg, command: act.thenArg, path: act.thenArg, url: act.thenArg, text: act.thenArg }]);
-            }
-          } else {
-            if (act.elseActions && Array.isArray(act.elseActions) && act.elseActions.length > 0) {
-              await executeActionList(act.elseActions);
-            } else if (act.elseActionType) {
-              await executeActionList([{ type: act.elseActionType, definitionId: act.elseActionType, key: act.elseArg, command: act.elseArg, path: act.elseArg, url: act.elseArg, text: act.elseArg }]);
-            }
-          }
-        } else if (type === 'LOOP_REPEAT') {
-          const count = Math.min(Math.max(Number(evaluateValue(act.count) || 1), 1), 100);
-          const delayMs = Math.max(Number(act.delay || 50), 0);
-          for (let i = 0; i < count; i++) {
-            if (act.loopActions && Array.isArray(act.loopActions) && act.loopActions.length > 0) {
-              await executeActionList(act.loopActions);
-            } else if (act.nestedActionType) {
-              await executeActionList([{ type: act.nestedActionType, definitionId: act.nestedActionType, key: act.nestedArg, command: act.nestedArg, path: act.nestedArg, url: act.nestedArg, text: act.nestedArg }]);
-            }
-            if (delayMs > 0 && i < count - 1) {
-              await new Promise(r => setTimeout(r, delayMs));
-            }
-          }
-        } else if (type === 'DELAY') {
-          const duration = Number(act.duration || 100);
-          if (duration > 0) {
-            await new Promise(r => setTimeout(r, duration));
-          }
-        } else if (normalizedType === 'CHANGE_PROFILE' || normalizedType === 'SWITCH_PROFILE') {
-          const targetProfileId = act.profileId ?? act.targetProfileId;
-          if (targetProfileId === undefined || targetProfileId === null || targetProfileId === '') {
-            console.error('Profile change action is missing its target profile ID.');
-            continue;
-          }
-
-          const currentProfiles = await get().loadProfiles();
-          const targetIndex = currentProfiles.findIndex(
-            profile => String(profile.id) === String(targetProfileId)
-          );
-          if (targetIndex === -1) {
-            console.error(`Profile change action target not found: ${targetProfileId}`);
-            continue;
-          }
-
-          const updatedProfiles = currentProfiles.map((profile, index) => ({
-            ...profile,
-            isActive: index === targetIndex
-          }));
-          await get().saveProfiles(updatedProfiles);
-          const activeProfile = updatedProfiles[targetIndex];
-          const blocks = (activeProfile.buttons || [])
-            .filter(button => button?.binding?.hid && button?.binding?.key)
-            .map(button => ({
-              hid: button.binding.hid,
-              key: button.binding.key
-            }));
-          sendToEngine({ type: 'init_block_list', blocks });
-        } else {
-          // Standard system / plugin action
-          sendToEngine({ type: 'EXECUTE_ACTION', actionData: { actions: [buildEngineAction(act)] } });
+    try {
+      if (
+        typeof navigator !== 'undefined' &&
+        typeof navigator.getBattery === 'function'
+      ) {
+        const battery = await navigator.getBattery();
+        if (battery && Number.isFinite(Number(battery.level))) {
+          next.battery = Math.round(Number(battery.level) * 100);
         }
       }
-    };
+    } catch (_) {
+      /* Battery API unavailable in this webview. */
+    }
 
-    await executeActionList(actions);
+    try {
+      const nativeMetrics = await invoke('get_system_metrics');
+      if (nativeMetrics && typeof nativeMetrics === 'object') {
+        if (nativeMetrics.cpu !== undefined && nativeMetrics.cpu !== null) {
+          next.cpu = Math.round(Number(nativeMetrics.cpu));
+        }
+        if (nativeMetrics.ram !== undefined && nativeMetrics.ram !== null) {
+          next.ram = Math.round(Number(nativeMetrics.ram));
+        }
+        if (nativeMetrics.battery !== undefined && nativeMetrics.battery !== null) {
+          next.battery = Math.round(Number(nativeMetrics.battery));
+        }
+      }
+    } catch (_) {
+      /* Native metrics command not available (browser preview or older build). */
+    }
+
+    set((state) => ({ systemMetrics: { ...state.systemMetrics, ...next } }));
+    return get().systemMetrics;
+  },
+
+  executeLogicSequence: async (actions, options = {}) => {
+    await runLogicSequence(actions, {
+      getVariables: () => get().variables,
+      setVariables: (variables) => {
+        set({ variables });
+        fileSystem.writeFile('variables.json', variables).catch(() => {});
+      },
+      getSystemMetrics: () => get().systemMetrics,
+      sendToEngine: (payload) => get().sendToEngine(payload),
+      loadProfiles: () => get().loadProfiles(),
+      saveProfiles: (profiles) => get().saveProfiles(profiles),
+      updateSystemMetrics: (partial) => get().updateSystemMetrics(partial)
+    }, options);
   },
 
   executeHoldRelease: async (actions) => {
-    if (!actions || !Array.isArray(actions)) return;
+    const releaseActions = collectHoldReleaseActions(actions);
+    if (releaseActions.length === 0) return;
+
     const { sendToEngine } = get();
-
-    for (const act of actions) {
-      if (!act) continue;
-      if (!isHoldReleaseAction(act)) continue;
-
+    for (const act of releaseActions) {
       await sendToEngine({
         type: 'EXECUTE_ACTION',
         actionData: { actions: [{ ...act, phase: 'release' }] }
@@ -442,8 +347,6 @@ const useStore = create((set, get) => ({
   // --- YENİ DİNLEME FONKSİYONU (Tauri Event) ---
  startListener: async () => {
   try {
-    console.log("[Store] Dinleyiciler başlatılıyor...");
-    
     // 👂 1. KULAK: Sadece Tuş Vuruşlarını ve Ping'i Dinler (INPUT_EVENT)
     const unlistenInput = await listen('INPUT_EVENT', (event) => {
       let data = event.payload;
@@ -481,8 +384,6 @@ const useStore = create((set, get) => ({
         try { data = JSON.parse(data); } catch { return; }
       }
 
-      console.log("🔥 [STORE] ACTION DATA GELDİ:", data);
-
       if (data) {
         // Bunu da lastMessage'a atıyoruz ki ActionEditor yakalasın
         // (ActionEditor useEffect içinde lastMessage'ı dinliyor zaten)
@@ -503,7 +404,6 @@ const useStore = create((set, get) => ({
 
     // 👋 TEMİZLİK: Fonksiyon return ettiğinde (unmount olduğunda) dinleyicileri kapat
     return () => {
-      console.log("[Store] Dinleyiciler kapatılıyor...");
       unlistenInput();
       unlistenActionData();
       unlistenPluginState();
@@ -619,43 +519,6 @@ const useStore = create((set, get) => ({
     });
   },
 }));
-
-const STATIC_ACTION_KEYS = new Set([
-  'OPEN_APP', 'OPEN_URL', 'HOTKEY', 'PLAY_SOUND',
-  'MEDIA_BUTTON', 'VOLUME_UP', 'VOLUME_DOWN', 'MUTE', 'VOLUME_MUTE',
-  'MEDIA_PLAY', 'MEDIA_PLAY_PAUSE', 'MEDIA_STOP', 'MEDIA_NEXT', 'MEDIA_PREV', 'MEDIA_PREVIOUS',
-  'DELAY', 'CHANGE_PROFILE', 'SWITCH_PROFILE',
-  'SCREENSHOT', 'CLIPBOARD_HISTORY', 'SHOW_DESKTOP', 'TOGGLE_DESKTOP',
-  'TASK_MANAGER', 'OPEN_TASK_MANAGER', 'CLOSE_WINDOW', 'LOCK_SCREEN', 'SYSTEM_LOCK',
-  'TYPE_TEXT', 'TEXT_MACRO', 'RUN_COMMAND', 'OPEN_FOLDER',
-  'VIRTUAL_DESKTOP_LEFT', 'VIRTUAL_DESKTOP_RIGHT',
-  'BRIGHTNESS_UP', 'BRIGHTNESS_DOWN', 'TIMER_START', 'EMPTY_RECYCLE_BIN', 'SYSTEM_SLEEP', 'SWITCH_AUDIO_OUTPUT'
-]);
-
-const HOLD_RELEASE_CORE_ACTIONS = new Set(['MUTE', 'VOLUME_MUTE', 'SET_SYSTEM_MUTE']);
-
-// Hold mode executes the full action sequence once on press. On release only
-// actions that can undo their press effect are forwarded to the engine.
-export const isHoldReleaseAction = (act) => {
-  if (!act) return false;
-
-  const defId = String(act.definitionId || act.type || '').toUpperCase();
-  const rawType = String(act.type || '').toUpperCase();
-
-  if (HOLD_RELEASE_CORE_ACTIONS.has(defId) || HOLD_RELEASE_CORE_ACTIONS.has(rawType)) {
-    return true;
-  }
-
-  if (
-    (rawType === 'MEDIA_BUTTON' || defId === 'MEDIA_BUTTON') &&
-    String(act.button || '').toLowerCase() === 'mute'
-  ) {
-    return true;
-  }
-
-  // Every action that is not a built-in system action is a plugin action.
-  return !STATIC_ACTION_KEYS.has(defId) && !STATIC_ACTION_KEYS.has(rawType);
-};
 
 export const getDynamicStateForButton = (button, dynamicStates) => {
   if (!button || !button.actions || !Array.isArray(button.actions) || !dynamicStates) return null;

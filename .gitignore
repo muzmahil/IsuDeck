@@ -79,3 +79,7 @@ desktop.ini
 *.swp
 *.swo
 *~
+
+# --- Local AI & Tooling Configs ---
+opencode.json
+.opencode/

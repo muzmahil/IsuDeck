@@ -273,24 +273,11 @@ body.theme-light .bg-black\/80 {
   background-color: rgba(15, 23, 42, 0.5) !important;
 }
 
-/* Scrollbars */
-*::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-*::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-*::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.3);
-  border-radius: 4px;
-}
-
-*::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.5);
-}
+/* Scrollbars.
+   Styling every scrollbar through the proprietary WebKit pseudo-elements
+   forces WebView2/Chromium to scroll on the main thread, which makes long
+   action lists stutter. Keep the native scrollbars (they follow
+   `color-scheme`) so scrolling stays on the compositor. */
 
 /* Global button and interactive hover cursor pointer */
 button, select, [role="button"] {
@@ -470,3 +457,141 @@ body.theme-light .plugin-readme h2,
 body.theme-light .plugin-readme hr { border-color: rgba(15, 23, 42, 0.1); }
 [data-theme="light"] .plugin-progress,
 body.theme-light .plugin-progress { background: rgba(15, 23, 42, 0.08); }
+
+/* Release notes inside the update dialog are dense: the README scale is too
+   large for a 85vh modal, so this modifier tightens the typography. */
+.release-notes {
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+.release-notes h1 { font-size: 1.05rem; }
+.release-notes h2 {
+  font-size: 0.95rem;
+  padding-bottom: 0.35rem;
+  margin: 1.25rem 0 0.6rem;
+}
+.release-notes h3 { font-size: 0.875rem; }
+.release-notes h4,
+.release-notes h5,
+.release-notes h6 { font-size: 0.8125rem; }
+.release-notes h1,
+.release-notes h2,
+.release-notes h3,
+.release-notes h4 {
+  letter-spacing: 0;
+  margin: 1.15rem 0 0.5rem;
+}
+.release-notes p { margin: 0.6rem 0; }
+.release-notes ul,
+.release-notes ol { margin: 0.55rem 0 0.7rem; padding-left: 1.2rem; }
+.release-notes li { margin: 0.25rem 0; }
+.release-notes li > ul,
+.release-notes li > ol { margin: 0.25rem 0; }
+.release-notes pre { margin: 0.7rem 0; padding: 0.7rem 0.85rem; }
+.release-notes blockquote { margin: 0.7rem 0; padding: 0.5rem 0.75rem; }
+.release-notes table { margin: 0.7rem 0; font-size: 0.75rem; }
+.release-notes th,
+.release-notes td { padding: 0.4rem 0.55rem; }
+.release-notes hr { margin: 1.25rem 0; }
+
+/* ============================================================ */
+/* ACCENT UTILITIES (follow settings.accentColor)               */
+/* ============================================================ */
+@utility accent-bg {
+  background-color: var(--primary-accent);
+}
+@utility accent-bg-soft {
+  background-color: color-mix(in srgb, var(--primary-accent) 15%, transparent);
+}
+@utility accent-bg-faint {
+  background-color: color-mix(in srgb, var(--primary-accent) 6%, transparent);
+}
+@utility accent-text {
+  color: var(--primary-accent);
+}
+@utility accent-border {
+  border-color: var(--primary-accent);
+}
+@utility accent-border-soft {
+  border-color: color-mix(in srgb, var(--primary-accent) 45%, transparent);
+}
+@utility accent-ring {
+  --tw-ring-color: color-mix(in srgb, var(--primary-accent) 45%, transparent);
+}
+@utility accent-glow {
+  box-shadow: 0 0 20px color-mix(in srgb, var(--primary-accent) 25%, transparent);
+}
+@utility accent-shadow {
+  box-shadow: 0 10px 30px -12px color-mix(in srgb, var(--primary-accent) 50%, transparent);
+}
+
+/* Action list scrolling.
+   Offscreen content skipping used to be enabled here, but its intrinsic-size
+   estimate conflicted with the real card heights and made WebView2 fight the
+   scroll position while cards entered the viewport (felt like the list froze
+   with 30+ actions). Layout/style containment keeps each card independent
+   without changing its measured size, and disabling scroll anchoring stops
+   the engine from re-adjusting scrollTop when cards expand or collapse. */
+.action-card {
+  contain: layout style;
+}
+
+.action-list {
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+}
+
+/* ============================================================ */
+/* ENTER ANIMATIONS (Tailwind v4 has no animate-in by default)   */
+/* ============================================================ */
+@keyframes isu-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes isu-zoom-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes isu-slide-in-up {
+  from { opacity: 0; transform: translateY(0.5rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes isu-slide-in-down {
+  from { opacity: 0; transform: translateY(-0.25rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-in {
+  animation-name: isu-fade-in;
+  animation-duration: 0.2s;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  animation-fill-mode: both;
+}
+.fade-in { animation-name: isu-fade-in; }
+.zoom-in-95 { animation-name: isu-zoom-in; transform-origin: center; }
+.slide-in-from-bottom-2 { animation-name: isu-slide-in-up; }
+.slide-in-from-top-1,
+.slide-in-from-top-4 { animation-name: isu-slide-in-down; }
+
+/* ============================================================ */
+/* ADDITIONAL LIGHT-THEME SURFACES                              */
+/* Editor logic cards used surfaces that were not remapped yet.  */
+/* ============================================================ */
+[data-theme="light"] .bg-\[\#101012\],
+[data-theme="light"] .bg-\[\#161619\],
+[data-theme="light"] .bg-\[\#18181c\],
+body.theme-light .bg-\[\#101012\],
+body.theme-light .bg-\[\#161619\],
+body.theme-light .bg-\[\#18181c\] {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+[data-theme="light"] .bg-\[\#1c1c20\],
+body.theme-light .bg-\[\#1c1c20\] {
+  background-color: #eef2f7 !important;
+  color: #0f172a !important;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+}
+[data-theme="light"] .text-zinc-700,
+body.theme-light .text-zinc-700 {
+  color: #94a3b8 !important;
+}

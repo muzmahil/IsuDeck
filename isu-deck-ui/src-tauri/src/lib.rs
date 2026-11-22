@@ -737,6 +737,165 @@ fn get_platform() -> String {
     return "other".to_string();
 }
 
+#[derive(serde::Serialize)]
+struct SystemMetricsPayload {
+    cpu: Option<f32>,
+    ram: Option<f32>,
+    battery: Option<f32>,
+}
+
+#[cfg(windows)]
+fn read_system_metrics() -> SystemMetricsPayload {
+    use std::sync::{Mutex, OnceLock};
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+    use windows_sys::Win32::System::SystemInformation::{
+        GlobalMemoryStatusEx, MEMORYSTATUSEX,
+    };
+    use windows_sys::Win32::System::Threading::GetSystemTimes;
+
+    static CPU_SAMPLE: OnceLock<Mutex<Option<(u64, u64)>>> = OnceLock::new();
+
+    let ram = unsafe {
+        let mut status: MEMORYSTATUSEX = std::mem::zeroed();
+        status.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+        if GlobalMemoryStatusEx(&mut status) != 0 {
+            Some(status.dwMemoryLoad as f32)
+        } else {
+            None
+        }
+    };
+
+    let cpu = unsafe {
+        let mut idle: FILETIME = std::mem::zeroed();
+        let mut kernel: FILETIME = std::mem::zeroed();
+        let mut user: FILETIME = std::mem::zeroed();
+
+        if GetSystemTimes(&mut idle, &mut kernel, &mut user) == 0 {
+            None
+        } else {
+            let to_u64 = |time: FILETIME| {
+                ((time.dwHighDateTime as u64) << 32) | time.dwLowDateTime as u64
+            };
+            let idle_total = to_u64(idle);
+            let total = to_u64(kernel) + to_u64(user);
+
+            match CPU_SAMPLE.get_or_init(|| Mutex::new(None)).lock() {
+                Ok(mut previous) => {
+                    let usage = match *previous {
+                        Some((prev_idle, prev_total)) if total > prev_total => {
+                            let total_delta = total - prev_total;
+                            let idle_delta = idle_total.saturating_sub(prev_idle);
+                            let busy_delta = total_delta.saturating_sub(idle_delta);
+                            Some((busy_delta as f32 / total_delta as f32) * 100.0)
+                        }
+                        _ => None,
+                    };
+                    *previous = Some((idle_total, total));
+                    usage
+                }
+                Err(_) => None,
+            }
+        }
+    };
+
+    let battery = unsafe {
+        let mut status: SYSTEM_POWER_STATUS = std::mem::zeroed();
+        if GetSystemPowerStatus(&mut status) != 0 && status.BatteryLifePercent != 255 {
+            Some(status.BatteryLifePercent as f32)
+        } else {
+            None
+        }
+    };
+
+    SystemMetricsPayload { cpu, ram, battery }
+}
+
+#[cfg(target_os = "linux")]
+fn read_system_metrics() -> SystemMetricsPayload {
+    use std::sync::{Mutex, OnceLock};
+
+    static CPU_SAMPLE: OnceLock<Mutex<Option<(u64, u64)>>> = OnceLock::new();
+
+    let cpu = std::fs::read_to_string("/proc/stat").ok().and_then(|content| {
+        let line = content.lines().next()?;
+        let values: Vec<u64> = line
+            .split_whitespace()
+            .skip(1)
+            .filter_map(|value| value.parse().ok())
+            .collect();
+
+        if values.len() < 4 {
+            return None;
+        }
+
+        let idle = values[3] + values.get(4).copied().unwrap_or(0);
+        let total: u64 = values.iter().take(8).sum();
+
+        let mut previous = CPU_SAMPLE.get_or_init(|| Mutex::new(None)).lock().ok()?;
+        let usage = match *previous {
+            Some((prev_idle, prev_total)) if total > prev_total => {
+                let total_delta = total - prev_total;
+                let idle_delta = idle.saturating_sub(prev_idle);
+                let busy_delta = total_delta.saturating_sub(idle_delta);
+                Some((busy_delta as f32 / total_delta as f32) * 100.0)
+            }
+            _ => None,
+        };
+        *previous = Some((idle, total));
+        usage
+    });
+
+    let ram = std::fs::read_to_string("/proc/meminfo").ok().and_then(|content| {
+        let mut total = 0.0f64;
+        let mut available = 0.0f64;
+
+        for line in content.lines() {
+            if let Some(rest) = line.strip_prefix("MemTotal:") {
+                total = rest.split_whitespace().next()?.parse().ok()?;
+            } else if let Some(rest) = line.strip_prefix("MemAvailable:") {
+                available = rest.split_whitespace().next()?.parse().ok()?;
+            }
+        }
+
+        if total > 0.0 {
+            Some((((total - available) / total) * 100.0) as f32)
+        } else {
+            None
+        }
+    });
+
+    let battery = std::fs::read_dir("/sys/class/power_supply").ok().and_then(|entries| {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("BAT") {
+                if let Ok(capacity) = std::fs::read_to_string(entry.path().join("capacity")) {
+                    if let Ok(value) = capacity.trim().parse::<f32>() {
+                        return Some(value);
+                    }
+                }
+            }
+        }
+        None
+    });
+
+    SystemMetricsPayload { cpu, ram, battery }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn read_system_metrics() -> SystemMetricsPayload {
+    SystemMetricsPayload {
+        cpu: None,
+        ram: None,
+        battery: None,
+    }
+}
+
+#[command]
+fn get_system_metrics() -> SystemMetricsPayload {
+    read_system_metrics()
+}
+
 #[command]
 fn open_external_url(url: String) -> Result<(), String> {
     platform::PlatformActions::open_url(&url);
@@ -792,6 +951,7 @@ pub fn run() {
             set_autostart,
             get_app_version,
             get_platform,
+            get_system_metrics,
             open_external_url,
             plugin_store::plugin_store_fetch_registry,
             plugin_store::plugin_store_install_from_url,

@@ -6,9 +6,14 @@
   "executable": "obs_plugin.exe",
   "description": "Official OBS Studio integration for IsuDeck. Connects via OBS WebSocket v5 to control program scenes, audio input mute states, streaming, and recording in real-time.",
   "author": "IsuDeck",
-  "license": "MIT",
+  "license": "GPL-3.0-only",
   "icon": "icon.png",
   "readme": "README.md",
+  "store": {
+    "downloadUrl": "https://github.com/muzmahil/IsuDeck.OBSPlugin/releases/download/v1.0.0/IsuDeck.OBSPlugin.zip",
+    "sha256": "08c28b849d70c608ef1a360a0e57452e38da846d264404b42a491ff41d28b64e",
+    "size": 955039
+  },
   "config": [
     {
       "key": "ip",

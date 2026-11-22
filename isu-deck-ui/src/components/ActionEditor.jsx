@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import useStore from '../store/useStore';
+import { bindingMatchesMessage } from '../utils/bindingMatch';
 import { LUCIDE_ICONS, LUCIDE_ICONS_LIST, LUCIDE_ICON_CATEGORIES, getLucideCategories, LUCIDE_ATTRIBUTION } from '../utils/lucideIcons';
 
 // HTML Temizleme Fonksiyonu (Güvenlik için)
@@ -356,7 +356,15 @@ const STATIC_ACTION_TYPES = {
 };
 
 export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, initialData, existingButtons = [], onStealBinding, profiles = [] }) {
-  const { lastMessage, setIsInputRecording, t, language, plugins, sendToEngine, customSounds, settings, variables, systemMetrics } = useStore();
+  const lastMessage = useStore((state) => state.lastMessage);
+  const setIsInputRecording = useStore((state) => state.setIsInputRecording);
+  const t = useStore((state) => state.t);
+  const language = useStore((state) => state.language);
+  const plugins = useStore((state) => state.plugins);
+  const sendToEngine = useStore((state) => state.sendToEngine);
+  const customSounds = useStore((state) => state.customSounds);
+  const settings = useStore((state) => state.settings);
+  const variables = useStore((state) => state.variables);
   const accentColor = settings?.accentColor || '#3b82f6';
   const [activeTab, setActiveTab] = useState('appearance');
 
@@ -411,6 +419,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
   const [selectedImage, setSelectedImage] = useState(null);
   const [actions, setActions] = useState([]);
   const [assignedKey, setAssignedKey] = useState(null);
+  const [showBindingDetails, setShowBindingDetails] = useState(false);
   const [bindingData, setBindingData] = useState(null);
   const [holdMode, setHoldMode] = useState(false);
   const [showTitle, setShowTitle] = useState(true);
@@ -595,9 +604,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
 
       // Çakışma Kontrolü
       const conflictIndex = existingButtons.findIndex((btn, idx) =>
-        idx !== buttonIndex &&
-        btn?.binding?.key === lastMessage.key &&
-        btn?.binding?.hid === lastMessage.hid
+        idx !== buttonIndex && bindingMatchesMessage(btn?.binding, lastMessage)
       );
 
       if (conflictIndex !== -1) {
@@ -631,10 +638,6 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
       // Bu istek bizim şu an beklediğimiz bir istek mi?
       const cacheKey = pendingRequests.current[requestId];
 
-      // 👇 AJAN LOG 1: Bakalım elimizde ne var?
-      console.log("🕵️‍♂️ [DEBUG] Gelen Request ID:", requestId);
-      console.log("🕵️‍♂️ [DEBUG] Bulunan Cache Key:", cacheKey);
-
       if (cacheKey) {
         const rawList = Array.isArray(responseData) ? responseData : [];
 
@@ -645,22 +648,10 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
           image: item.image || item.Image
         }));
 
-        // 👇 AJAN LOG 2: Veri düzgün dönüştü mü?
-        console.log("🕵️‍♂️ [DEBUG] Dönüştürülen Veri (İlk Öğe):", safeData[0]);
-
-        // State güncelle
-        setDynamicOptions(prev => {
-          const newState = { ...prev, [cacheKey]: safeData };
-          // 👇 AJAN LOG 3: State güncelleniyor mu?
-          console.log("🕵️‍♂️ [DEBUG] Yeni State Anahtarları:", Object.keys(newState));
-          return newState;
-        });
+        setDynamicOptions(prev => ({ ...prev, [cacheKey]: safeData }));
 
         delete inFlightRequests.current[cacheKey];
         delete pendingRequests.current[requestId];
-      } else {
-        console.warn("⚠️ [DEBUG] Cache Key bulunamadı! Request ID eşleşmiyor:", requestId);
-        console.warn("      Beklenen ID'ler:", Object.keys(pendingRequests.current));
       }
     }
   }, [lastMessage]);
@@ -1076,7 +1067,9 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
         return JSON.parse(text);
       }
     } catch (err) {}
-    return null;
+    // WebView2 can drop the dataTransfer payload even though dragstart ran.
+    // The React state keeps the same information, so use it as a fallback.
+    return draggingAction || null;
   };
 
   const handleDropOnMain = (e) => {
@@ -1135,7 +1128,34 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
             const itemToMove = oldList.find(s => String(s.id) === String(data.actionId));
             if (!itemToMove) return prev;
 
+            const sameParent = String(data.parentId) === String(parentId);
+            const movedItem = {
+              ...itemToMove,
+              id: `sub_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
+            };
+
             return prev.map(a => {
+              if (sameParent && String(a.id) === String(parentId)) {
+                // Moving between two slots of the same block (THEN -> ELSE or
+                // vice versa). Remove from the source list and append to the
+                // target list in a single update.
+                const sourceList = Array.isArray(a[data.listKey]) ? a[data.listKey] : [];
+                const filteredSource = sourceList.filter(
+                  s => String(s.id) !== String(data.actionId)
+                );
+
+                if (data.listKey === listKey) {
+                  return { ...a, [listKey]: filteredSource };
+                }
+
+                const targetList = Array.isArray(a[listKey]) ? a[listKey] : [];
+                return {
+                  ...a,
+                  [data.listKey]: filteredSource,
+                  [listKey]: [...targetList, movedItem]
+                };
+              }
+
               if (String(a.id) === String(data.parentId)) {
                 const filtered = (Array.isArray(a[data.listKey]) ? a[data.listKey] : []).filter(s => String(s.id) !== String(data.actionId));
                 return { ...a, [data.listKey]: filtered };
@@ -1144,7 +1164,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                 const currentList = Array.isArray(a[listKey]) ? a[listKey] : [];
                 return {
                   ...a,
-                  [listKey]: [...currentList, { ...itemToMove, id: `sub_${Date.now()}_${Math.random().toString(36).substr(2, 5)}` }]
+                  [listKey]: [...currentList, movedItem]
                 };
               }
               return a;
@@ -1204,6 +1224,13 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
     return groups;
   };
 
+  // Grouping walks every action type and translates its labels. It is used in
+  // several places per render, so compute it once per actual filter change.
+  const groupedActions = useMemo(
+    () => getGroupedActions(),
+    [ACTION_TYPES, actionPluginFilter, actionSearch, language, t]
+  );
+
   const toggleCategory = (category) => {
     setCollapsedCategories(prev => ({
       ...prev,
@@ -1249,7 +1276,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
         }
       }
     } catch (err) {
-      console.log('Tauri API bulunamadı veya tarayıcı modunda:', err);
+      console.warn('Tauri API bulunamadı veya tarayıcı modunda:', err);
       setModal({
         show: true,
         type: 'alert',
@@ -1279,7 +1306,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
             placeholder={isPluginAct ? field.placeholder : t(field.placeholder, language)}
             maxLength={field.maxLength}
             minLength={field.minLength}
-            className="bg-[#121212] border border-white/10 rounded px-2.5 py-1.5 text-xs text-white w-full focus:border-blue-500 outline-none transition-colors"
+            className="bg-[#121212] border border-white/10 rounded px-2.5 py-1.5 text-xs text-white w-full focus:accent-border outline-none transition-colors"
           />
         )}
         {field.type === 'number' && (
@@ -1290,7 +1317,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
             min={field.min}
             max={field.max}
             placeholder={isPluginAct ? field.placeholder : t(field.placeholder, language)}
-            className={`bg-[#121212] border border-white/10 rounded px-2.5 py-1.5 text-xs text-white focus:border-blue-500 outline-none transition-colors ${field.width || 'w-full'}`}
+            className={`bg-[#121212] border border-white/10 rounded px-2.5 py-1.5 text-xs text-white focus:accent-border outline-none transition-colors ${field.width || 'w-full'}`}
           />
         )}
         {field.type === 'file' && (
@@ -1300,7 +1327,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
               value={targetAct[field.key] || ''}
               onChange={(e) => onUpdateField(field.key, e.target.value)}
               placeholder={isPluginAct ? field.placeholder : t(field.placeholder, language)}
-              className={`bg-[#121212] border border-white/10 rounded px-2.5 py-1.5 text-xs text-white focus:border-blue-500 outline-none transition-colors ${field.width || 'w-full'}`}
+              className={`bg-[#121212] border border-white/10 rounded px-2.5 py-1.5 text-xs text-white focus:accent-border outline-none transition-colors ${field.width || 'w-full'}`}
             />
             <button
               onClick={() => handleFileSelect(targetAct.id, field.key, field.filters, parentId, listKey)}
@@ -1313,7 +1340,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
         )}
         {field.type === 'checkbox' && (
           <div className="flex items-center gap-2.5 bg-[#121212] border border-white/10 rounded px-3 py-2 cursor-pointer" onClick={() => onUpdateField(field.key, !targetAct[field.key])}>
-            <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${targetAct[field.key] ? 'bg-blue-600 border-blue-600' : 'bg-zinc-800 border-zinc-600'}`}>
+            <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${targetAct[field.key] ? 'accent-bg accent-border' : 'bg-zinc-800 border-zinc-600'}`}>
               {targetAct[field.key] && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
             </div>
             <span className="text-xs text-zinc-300 select-none">{(isPluginAct ? field.description : t(field.description, language)) || (isPluginAct ? field.placeholder : t(field.placeholder, language)) || (language === 'tr' ? 'Etkinleştir' : 'Enable')}</span>
@@ -1330,7 +1357,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
               onChange={(e) => onUpdateField(field.key, parseFloat(e.target.value))}
               className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
             />
-            <span className="text-xs font-bold text-blue-400 w-10 text-right">
+            <span className="text-xs font-bold accent-text w-10 text-right">
               {targetAct[field.key] !== undefined ? targetAct[field.key] : (field.default || 0)}
             </span>
           </div>
@@ -1347,7 +1374,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
               type="text"
               value={targetAct[field.key] || '#000000'}
               onChange={(e) => onUpdateField(field.key, e.target.value)}
-              className="bg-[#121212] border border-white/10 rounded px-2 py-1 text-xs text-white w-24 focus:border-blue-500 outline-none transition-colors uppercase"
+              className="bg-[#121212] border border-white/10 rounded px-2 py-1 text-xs text-white w-24 focus:accent-border outline-none transition-colors uppercase"
               maxLength={7}
             />
           </div>
@@ -1361,7 +1388,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                   value={targetAct[field.key] || ''}
                   onChange={(e) => onUpdateField(field.key, e.target.value)}
                   placeholder={actDef?.isPlugin ? (field.placeholder || "Sahne veya kaynak adını yazın...") : t(field.placeholder, language)}
-                  className="bg-[#121212] border border-white/10 rounded px-2.5 py-1.5 text-xs text-white w-full focus:border-blue-500 outline-none transition-colors"
+                  className="bg-[#121212] border border-white/10 rounded px-2.5 py-1.5 text-xs text-white w-full focus:accent-border outline-none transition-colors"
                 />
               ) : (
                 <div className="relative w-full">
@@ -1373,7 +1400,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                         fetchDynamicData(targetAct, field.key);
                       }
                     }}
-                    className="bg-[#121212] border border-white/10 rounded px-2.5 py-1.5 text-xs text-white w-full focus:border-blue-500 outline-none transition-colors appearance-none cursor-pointer"
+                    className="bg-[#121212] border border-white/10 rounded px-2.5 py-1.5 text-xs text-white w-full focus:accent-border outline-none transition-colors appearance-none cursor-pointer"
                   >
                     <option value="" disabled>
                       {dynamicOptions[`${targetAct.id}_${field.key}`]?.length > 0
@@ -1405,7 +1432,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                   }));
                 }}
                 title={manualInputs[`${targetAct.id}_${field.key}`] ? (language === 'tr' ? "Listeden Seç" : "Select from List") : (language === 'tr' ? "Elle Yaz" : "Type Manually")}
-                className={`p-1.5 border rounded transition-colors shrink-0 ${manualInputs[`${targetAct.id}_${field.key}`] ? 'bg-blue-600/20 border-blue-500 text-blue-400' : 'bg-zinc-800 border-white/10 hover:bg-zinc-700 hover:text-white text-zinc-400'}`}
+                className={`p-1.5 border rounded transition-colors shrink-0 ${manualInputs[`${targetAct.id}_${field.key}`] ? 'accent-bg-soft accent-border accent-text' : 'bg-zinc-800 border-white/10 hover:bg-zinc-700 hover:text-white text-zinc-400'}`}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
               </button>
@@ -1427,7 +1454,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
               <select
                 value={targetAct[field.key] || ''}
                 onChange={(e) => onUpdateField(field.key, e.target.value)}
-                className="bg-[#121212] border border-white/10 rounded px-2.5 py-1.5 text-xs text-white w-full focus:border-blue-500 outline-none transition-colors appearance-none cursor-pointer"
+                className="bg-[#121212] border border-white/10 rounded px-2.5 py-1.5 text-xs text-white w-full focus:accent-border outline-none transition-colors appearance-none cursor-pointer"
               >
                 {(field.key === 'profileId' ? profiles.map(p => ({ value: p.id, label: p.name })) : (field.items || field.options))?.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -1447,7 +1474,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
               value={targetAct[field.key] || ''}
               onChange={(e) => onUpdateField(field.key, e.target.value)}
               placeholder={isPluginAct ? field.placeholder : t(field.placeholder, language)}
-              className="bg-[#121212] border border-white/10 rounded px-2.5 py-1.5 text-xs text-white w-full focus:border-blue-500 outline-none transition-colors min-h-[70px] resize-y"
+              className="bg-[#121212] border border-white/10 rounded px-2.5 py-1.5 text-xs text-white w-full focus:accent-border outline-none transition-colors min-h-[70px] resize-y"
             />
             <div className="bg-[#1a1a1a] border border-white/5 rounded p-2">
               <div className="text-[10px] text-zinc-500 mb-1 uppercase tracking-wider font-bold">{t('editor.appearance.preview', language)}</div>
@@ -1507,7 +1534,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
         }}
         onDrop={(e) => handleDropOnSlot(e, parentAct.id, listKey)}
         className={`pl-4 pr-3 py-2.5 border-l-[4px] ${theme.spineColor} ${theme.bgCavity} transition-all duration-150 relative ${
-          isHovered ? 'bg-blue-500/[0.08] ring-1 ring-blue-500/40' : ''
+          isHovered ? 'accent-bg-faint ring-1 accent-ring' : ''
         }`}
       >
         {/* Sub-actions List */}
@@ -1617,15 +1644,15 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
           onDrop={(e) => handleDropOnSlot(e, parentAct.id, listKey)}
           className={`p-3 rounded-xl border-2 border-dashed transition-all duration-150 flex flex-wrap items-center justify-between gap-2 cursor-pointer ${
             isHovered
-              ? 'border-blue-400 bg-blue-500/15 shadow-[0_0_20px_rgba(59,130,246,0.2)]'
+              ? 'accent-border accent-bg-soft accent-glow'
               : 'border-white/10 hover:border-white/20 bg-black/20 hover:bg-black/30'
           }`}
         >
           <div className="flex items-center gap-2 text-xs font-medium pointer-events-none">
-            <svg className={`w-4 h-4 transition-transform ${isHovered ? 'scale-125 animate-bounce text-blue-400' : 'text-zinc-500'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg className={`w-4 h-4 transition-transform ${isHovered ? 'scale-125 animate-bounce accent-text' : 'text-zinc-500'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M8 21h8"/>
             </svg>
-            <span className={isHovered ? 'text-blue-300 font-bold' : 'text-zinc-400'}>
+            <span className={isHovered ? 'accent-text font-bold' : 'text-zinc-400'}>
               {isHovered ? t('action_types.IF_CONDITION.drop_zone_hover', language) : (subList.length === 0 ? theme.emptyHint : t('action_types.IF_CONDITION.drag_hint', language))}
             </span>
           </div>
@@ -1642,7 +1669,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
               className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white border border-white/10 rounded-lg px-2.5 py-1 text-xs font-medium outline-none transition-all cursor-pointer appearance-none pr-6 shadow-sm"
             >
               <option value="" disabled>{t('action_types.IF_CONDITION.quick_add', language)}</option>
-              {Object.entries(getGroupedActions()).map(([cat, acts]) => {
+              {Object.entries(groupedActions).map(([cat, acts]) => {
                 const validActs = acts.filter(a => !a.isBlock);
                 if (validActs.length === 0) return null;
                 return (
@@ -1677,7 +1704,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
         setCustomSound(selected);
       }
     } catch (err) {
-      console.log('Ses dosyası seçme hatası:', err);
+      console.warn('Ses dosyası seçme hatası:', err);
     }
   };
 
@@ -1738,12 +1765,15 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
     };
   }, []);
 
+  const hasAssignedKey = Boolean(assignedKey && assignedKey.startsWith('Key:'));
+  const assignedKeyLabel = hasAssignedKey ? assignedKey.replace('Key: ', '') : '';
+
   if (!isOpen) return null;
 
 
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#0a0a0a] p-4 animate-in fade-in duration-200">
       <div className="w-full max-w-6xl h-[90vh] bg-[#1e1e1e] rounded-2xl border border-white/10 shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
 
         {/* Conflict Modal Overlay */}
@@ -1759,7 +1789,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                 <p className="text-zinc-400 text-sm leading-relaxed">
                   <span className="font-semibold text-white bg-white/10 px-1.5 py-0.5 rounded mx-1">{conflictInfo.binding.key}</span>
                   {t('editor.binding.conflict_msg', language)}
-                  <span className="text-blue-400 font-bold mx-1">{conflictInfo.label}</span>
+                  <span className="accent-text font-bold mx-1">{conflictInfo.label}</span>
                 </p>
               </div>
 
@@ -1781,12 +1811,16 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                     setAssignedKey(`Key: ${conflictInfo.binding.key}`);
                     setConflictInfo(null);
                   }}
-                  className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-blue-600/20"
+                  className="w-full py-3 accent-bg hover:brightness-110 text-white rounded-xl text-sm font-bold transition-colors shadow-lg accent-shadow"
                 >
                   {t('editor.binding.remove_other', language)}
                 </button>
                 <button
-                  onClick={() => setConflictInfo(null)}
+                  onClick={() => {
+                    setConflictInfo(null);
+                    setIsRecording(false);
+                    setAssignedKey(bindingData ? `Key: ${bindingData.key}` : null);
+                  }}
                   className="w-full py-2 text-zinc-500 hover:text-white text-sm font-medium transition-colors"
                 >
                   {t('editor.footer.cancel', language)}
@@ -1800,7 +1834,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
         {modal.show && (
           <div className="absolute inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in">
             <div className="bg-[#252525] border border-white/10 p-6 rounded-2xl shadow-2xl max-w-sm w-full text-center space-y-4 animate-in zoom-in-95 duration-200">
-              <div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto ${modal.type === 'confirm' ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-500'}`}>
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto ${modal.type === 'confirm' ? 'bg-red-500/10 text-red-500' : 'accent-bg-soft accent-text'}`}>
                 {modal.type === 'confirm' ? (
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>
                 ) : (
@@ -1822,7 +1856,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                 )}
                 <button
                   onClick={modal.onConfirm}
-                  className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg transition-all ${modal.type === 'confirm' ? 'bg-red-600 hover:bg-red-500 shadow-red-600/20' : 'bg-blue-600 hover:bg-blue-500 shadow-blue-600/20'}`}
+                  className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg transition-all ${modal.type === 'confirm' ? 'bg-red-600 hover:bg-red-500 shadow-red-600/20' : 'accent-bg hover:brightness-110 accent-shadow'}`}
                 >
                   {modal.type === 'confirm' ? t('editor.footer.delete_button', language) : 'OK'}
                 </button>
@@ -1834,7 +1868,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
         {/* Header */}
         <div className="h-14 border-b border-white/5 flex items-center justify-between px-6 bg-[#252525]">
           <h2 className="text-sm font-bold text-white tracking-wide uppercase">
-            {t('editor.edit_button', language)} <span className="text-blue-500">#{buttonIndex + 1}</span>
+            {t('editor.edit_button', language)} <span className="accent-text">#{buttonIndex + 1}</span>
           </h2>
           <button onClick={handleClose} className="text-zinc-400 hover:text-white transition-colors cursor-pointer">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="M6 6 18 18" /></svg>
@@ -1875,7 +1909,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                     type="text"
                     value={label}
                     onChange={(e) => setLabel(e.target.value)}
-                    className="w-full bg-[#121212] border border-white/10 rounded-xl px-4 py-4 text-white focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all placeholder:text-zinc-700"
+                    className="w-full bg-[#121212] border border-white/10 rounded-xl px-4 py-4 text-white focus:outline-none focus:accent-border focus:ring-1 focus:ring-[var(--primary-accent)] transition-all placeholder:text-zinc-700"
                     placeholder={language === 'tr' ? 'Örn: OBS Sahne 1' : 'e.g. OBS Scene 1'}
                   />
                 </div>
@@ -1907,7 +1941,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                         value={bgColor}
                         onChange={(e) => setBgColor(e.target.value)}
                         placeholder="#HEX or rgb()"
-                        className="bg-[#121212] border border-white/10 rounded-lg px-3 py-2 text-xs text-white w-32 focus:border-blue-500/50 outline-none transition-all"
+                        className="bg-[#121212] border border-white/10 rounded-lg px-3 py-2 text-xs text-white w-32 focus:accent-border outline-none transition-all"
                       />
                     </div>
                   </div>
@@ -1959,7 +1993,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                               placeholder={t('editor.appearance.search_plugin_icons', language)}
                               value={pluginIconSearch}
                               onChange={(e) => setPluginIconSearch(e.target.value)}
-                              className="w-full bg-[#1a1a1a] border border-white/10 rounded-lg pl-7 pr-2 py-1.5 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-blue-500/50"
+                              className="w-full bg-[#1a1a1a] border border-white/10 rounded-lg pl-7 pr-2 py-1.5 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:accent-border"
                             />
                             <svg className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
                           </div>
@@ -1967,7 +2001,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                           <select
                             value={selectedPluginCategory}
                             onChange={(e) => setSelectedPluginCategory(e.target.value)}
-                            className="bg-[#1a1a1a] border border-white/10 rounded-lg px-2.5 py-1.5 text-[11px] text-white focus:outline-none focus:border-blue-500/50 cursor-pointer max-w-[130px] truncate"
+                            className="bg-[#1a1a1a] border border-white/10 rounded-lg px-2.5 py-1.5 text-[11px] text-white focus:outline-none focus:accent-border cursor-pointer max-w-[130px] truncate"
                           >
                             <option value="all">{t('editor.appearance.all_plugins', language)}</option>
                             {pluginCategories.filter(c => c !== 'all').map(c => (
@@ -2032,7 +2066,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                               placeholder={t('editor.appearance.search_icons', language)}
                               value={lucideSearch}
                               onChange={(e) => setLucideSearch(e.target.value)}
-                              className="w-full bg-[#1a1a1a] border border-white/10 rounded-lg pl-7 pr-2 py-1.5 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-blue-500/50"
+                              className="w-full bg-[#1a1a1a] border border-white/10 rounded-lg pl-7 pr-2 py-1.5 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:accent-border"
                             />
                             <svg className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
                           </div>
@@ -2112,7 +2146,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                         {/* Lisans Referansı */}
                         <div className="flex items-center justify-between pt-1 border-t border-white/5 text-[10px] text-zinc-500 shrink-0">
                           <span className="flex items-center gap-1 text-zinc-400">
-                            <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                            <span className="w-1.5 h-1.5 rounded-full accent-bg" />
                             {selectedLucideIcon}
                           </span>
                           <span className="text-zinc-500 hover:text-zinc-400 transition-colors">
@@ -2139,7 +2173,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                           <button
                             key={i}
                             onClick={() => setSelectedEmoji(emoji)}
-                            className={`aspect-square flex items-center justify-center text-2xl rounded-lg transition-all cursor-pointer ${selectedEmoji === emoji ? 'bg-blue-600/20 border border-blue-500/50' : 'hover:bg-white/5'}`}
+                            className={`aspect-square flex items-center justify-center text-2xl rounded-lg transition-all cursor-pointer ${selectedEmoji === emoji ? 'accent-bg-soft border accent-border-soft' : 'hover:bg-white/5'}`}
                           >
                             {emoji}
                           </button>
@@ -2185,7 +2219,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                       <select
                         value={actionPluginFilter}
                         onChange={(e) => setActionPluginFilter(e.target.value)}
-                        className="w-full bg-[#141416] border border-white/10 hover:border-white/20 rounded-xl px-3 py-2 text-xs text-white focus:border-blue-500/50 outline-none transition-all appearance-none cursor-pointer pr-8 font-medium"
+                        className="w-full bg-[#141416] border border-white/10 hover:border-white/20 rounded-xl px-3 py-2 text-xs text-white focus:accent-border outline-none transition-all appearance-none cursor-pointer pr-8 font-medium"
                       >
                         <option value="all">{t('editor.actions.filter_all', language)}</option>
                         <option value="builtin">{t('editor.actions.filter_builtin', language)}</option>
@@ -2210,15 +2244,15 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                         placeholder={t('editor.actions.search', language)}
                         value={actionSearch}
                         onChange={(e) => setActionSearch(e.target.value)}
-                        className="w-full bg-[#121212] border border-white/10 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all placeholder:text-zinc-600 shadow-inner"
+                        className="w-full bg-[#121212] border border-white/10 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:accent-border focus:ring-1 focus:ring-[var(--primary-accent)] outline-none transition-all placeholder:text-zinc-600 shadow-inner"
                       />
-                      <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 group-focus-within:text-blue-400 transition-colors" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+                      <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 group-focus-within:accent-text transition-colors" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
                     </div>
                   </div>
 
                   {/* Kategorili Liste */}
                   <div className="flex-1 overflow-y-auto pr-1.5 space-y-4 scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent">
-                    {Object.entries(getGroupedActions()).map(([category, categoryActions]) => (
+                    {Object.entries(groupedActions).map(([category, categoryActions]) => (
                       <div key={category} className="space-y-2">
                         <button
                           onClick={() => toggleCategory(category)}
@@ -2247,13 +2281,13 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                 role="button"
                                 tabIndex={0}
                                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); addAction(type.typeKey); } }}
-                                className="flex items-center justify-between p-2.5 bg-[#141416] border border-white/5 rounded-xl hover:border-blue-500/40 hover:bg-[#1a1a1f] hover:shadow-md transition-all text-left group/btn cursor-grab active:cursor-grabbing select-none"
+                                className="flex items-center justify-between p-2.5 bg-[#141416] border border-white/5 rounded-xl hover:accent-border-soft hover:bg-[#1a1a1f] hover:shadow-md transition-all text-left group/btn cursor-grab active:cursor-grabbing select-none"
                               >
                                 <div className="flex items-center gap-2.5 min-w-0 pointer-events-none">
                                   <span className="text-zinc-500 group-hover/btn:text-zinc-300 font-mono text-sm leading-none shrink-0" title="Sürükle">
                                     ⠿
                                   </span>
-                                  <div className="w-8 h-8 rounded-lg bg-zinc-800/70 flex items-center justify-center text-lg shrink-0 group-hover/btn:bg-blue-600/20 group-hover/btn:scale-105 transition-all text-white">
+                                  <div className="w-8 h-8 rounded-lg bg-zinc-800/70 flex items-center justify-center text-lg shrink-0 group-hover/btn:accent-bg-soft group-hover/btn:scale-105 transition-all text-white">
                                     {type.icon}
                                   </div>
                                   <div className="truncate">
@@ -2268,7 +2302,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                 <button
                                   type="button"
                                   onClick={(e) => { e.stopPropagation(); addAction(type.typeKey); }}
-                                  className="w-6 h-6 rounded-md bg-white/5 hover:bg-blue-600 text-zinc-500 hover:text-white flex items-center justify-center shrink-0 transition-all ml-2 cursor-pointer"
+                                  className="w-6 h-6 rounded-md bg-white/5 hover:brightness-110 text-zinc-500 hover:text-white flex items-center justify-center shrink-0 transition-all ml-2 cursor-pointer"
                                   title={language === 'tr' ? 'Listeye Ekle' : 'Add to List'}
                                 >
                                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -2280,7 +2314,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                       </div>
                     ))}
 
-                    {Object.keys(getGroupedActions()).length === 0 && (
+                    {Object.keys(groupedActions).length === 0 && (
                       <div className="flex flex-col items-center justify-center py-8 text-zinc-600">
                         <svg className="w-8 h-8 mb-2 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
                         <span className="text-xs">{t('editor.actions.no_actions', language)}</span>
@@ -2316,11 +2350,11 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                       onDrop={handleDropOnMain}
                       className={`flex-1 flex flex-col items-center justify-center text-zinc-600 border-2 border-dashed rounded-xl transition-all duration-200 cursor-pointer ${
                         activeDropTarget === 'main'
-                          ? 'border-blue-400 bg-blue-500/10 text-blue-300 shadow-[0_0_20px_rgba(59,130,246,0.2)]'
+                          ? 'accent-border accent-bg-soft accent-text accent-glow'
                           : 'border-white/10 hover:border-white/20'
                       }`}
                     >
-                      <svg className={`w-8 h-8 mb-2 transition-transform ${activeDropTarget === 'main' ? 'scale-125 animate-bounce text-blue-400' : 'text-zinc-600'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <svg className={`w-8 h-8 mb-2 transition-transform ${activeDropTarget === 'main' ? 'scale-125 animate-bounce accent-text' : 'text-zinc-600'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M8 21h8"/>
                       </svg>
                       <span className="text-sm font-medium">{activeDropTarget === 'main' ? t('action_types.IF_CONDITION.drop_zone_hover', language) : t('editor.actions.no_actions', language)}</span>
@@ -2342,8 +2376,8 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                         if (activeDropTarget === 'main') setActiveDropTarget(null);
                       }}
                       onDrop={handleDropOnMain}
-                      className={`space-y-3 overflow-y-auto pr-2 flex-1 min-h-0 rounded-xl transition-all duration-200 ${
-                        activeDropTarget === 'main' ? 'ring-2 ring-blue-500/30 bg-blue-500/[0.02]' : ''
+                      className={`action-list space-y-3 overflow-y-auto pr-2 flex-1 min-h-0 rounded-xl ${
+                        activeDropTarget === 'main' ? 'accent-ring accent-bg-faint' : ''
                       }`}
                     >
                       {actions.map((act, idx) => {
@@ -2381,10 +2415,10 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                           return (
                             <div
                               key={act.id}
-                              className="flex flex-col rounded-2xl overflow-hidden border border-white/10 bg-[#161619] shadow-lg transition-all group"
+                              className="action-card flex flex-col rounded-2xl overflow-hidden border border-white/10 bg-[#1e1e1e] shadow-lg transition-colors group"
                             >
                               {/* ÜST KOL (TOP SHOULDER OF C-HOOK) */}
-                              <div className="bg-[#1c1c20] border-b border-white/10 p-2.5 sm:p-3 flex flex-wrap items-center justify-between gap-2.5 text-xs">
+                              <div className="bg-[#1e1e1e] border-b border-white/10 p-2.5 sm:p-3 flex flex-wrap items-center justify-between gap-2.5 text-xs">
                                 <div className="flex items-center gap-2 flex-wrap min-w-0">
                                   <span
                                     draggable={true}
@@ -2408,8 +2442,8 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                   {/* Değişken Seçici (Dropdown + Özel Değişken Seçeneği) */}
                                   <div className="flex items-center gap-1">
                                     {act.isCustomVar ? (
-                                      <div className="flex items-center bg-[#101012] border border-white/15 focus-within:border-blue-400 rounded-lg px-2 py-1 shadow-inner">
-                                        <span className="text-blue-400 mr-1 text-[11px] font-mono font-bold">$</span>
+                                      <div className="flex items-center bg-[#101012] border border-white/15 focus-within:accent-border rounded-lg px-2 py-1 shadow-inner">
+                                        <span className="accent-text mr-1 text-[11px] font-mono font-bold">$</span>
                                         <input
                                           type="text"
                                           value={act.leftOperand || ''}
@@ -2438,7 +2472,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                               updateAction(act.id, 'leftOperand', e.target.value);
                                             }
                                           }}
-                                          className="bg-[#101012] border border-white/15 hover:border-white/25 focus:border-blue-400 rounded-lg px-2.5 py-1 text-xs text-zinc-100 font-semibold outline-none cursor-pointer appearance-none pr-6 shadow-inner max-w-[210px]"
+                                          className="bg-[#101012] border border-white/15 hover:border-white/25 focus:accent-border rounded-lg px-2.5 py-1 text-xs text-zinc-100 font-semibold outline-none cursor-pointer appearance-none pr-6 shadow-inner max-w-[210px]"
                                         >
                                           <option value="" disabled>
                                             {t('action_types.IF_CONDITION.select_variable', language)}
@@ -2478,7 +2512,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                     <select
                                       value={act.operator || '=='}
                                       onChange={(e) => updateAction(act.id, 'operator', e.target.value)}
-                                      className="bg-[#101012] border border-white/15 hover:border-white/25 focus:border-blue-400 rounded-lg px-2.5 py-1 text-xs text-zinc-200 font-bold outline-none cursor-pointer appearance-none pr-6 shadow-inner"
+                                      className="bg-[#101012] border border-white/15 hover:border-white/25 focus:accent-border rounded-lg px-2.5 py-1 text-xs text-zinc-200 font-bold outline-none cursor-pointer appearance-none pr-6 shadow-inner"
                                     >
                                       {[
                                         { value: '==', labelKey: 'action_types.operators.eq' },
@@ -2500,7 +2534,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                   </div>
 
                                   {/* Karşılaştırma Değeri & Hazır Değer Butonları */}
-                                  <div className="flex items-center gap-1.5 bg-[#101012] border border-white/15 focus-within:border-blue-400 rounded-lg px-2 py-1 shadow-inner">
+                                  <div className="flex items-center gap-1.5 bg-[#101012] border border-white/15 focus-within:accent-border rounded-lg px-2 py-1 shadow-inner">
                                     <input
                                       type="text"
                                       value={act.rightOperand || ''}
@@ -2516,7 +2550,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                           type="button"
                                           onClick={() => updateAction(act.id, 'rightOperand', 'true')}
                                           className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors cursor-pointer ${
-                                            act.rightOperand === 'true' ? 'bg-blue-600 text-white' : 'bg-white/5 text-zinc-400 hover:text-white'
+                                            act.rightOperand === 'true' ? 'accent-bg text-white' : 'bg-white/5 text-zinc-400 hover:text-white'
                                           }`}
                                         >
                                           true
@@ -2525,7 +2559,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                           type="button"
                                           onClick={() => updateAction(act.id, 'rightOperand', 'false')}
                                           className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors cursor-pointer ${
-                                            act.rightOperand === 'false' ? 'bg-blue-600 text-white' : 'bg-white/5 text-zinc-400 hover:text-white'
+                                            act.rightOperand === 'false' ? 'accent-bg text-white' : 'bg-white/5 text-zinc-400 hover:text-white'
                                           }`}
                                         >
                                           false
@@ -2539,7 +2573,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                             type="button"
                                             onClick={() => updateAction(act.id, 'rightOperand', val)}
                                             className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-colors cursor-pointer ${
-                                              act.rightOperand === val ? 'bg-blue-600 text-white' : 'bg-white/5 text-zinc-400 hover:text-white'
+                                              act.rightOperand === val ? 'accent-bg text-white' : 'bg-white/5 text-zinc-400 hover:text-white'
                                             }`}
                                           >
                                             {val}
@@ -2561,7 +2595,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                     onClick={() => updateAction(act.id, 'hasElse', !act.hasElse)}
                                     className={`px-2 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
                                       act.hasElse
-                                        ? 'bg-blue-600/20 text-blue-300 border border-blue-500/40'
+                                        ? 'accent-bg-soft accent-text border accent-border-soft'
                                         : 'bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white border border-white/5'
                                     }`}
                                   >
@@ -2569,7 +2603,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                   </button>
                                   <button onClick={() => moveActionUp(idx)} disabled={idx === 0} className="p-1 text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m18 15-6-6-6 6" /></svg></button>
                                   <button onClick={() => moveActionDown(idx)} disabled={idx === actions.length - 1} className="p-1 text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg></button>
-                                  <button onClick={() => duplicateAction(act)} className="p-1 text-zinc-400 hover:text-blue-400 transition-colors cursor-pointer" title="Çoğalt"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg></button>
+                                  <button onClick={() => duplicateAction(act)} className="p-1 text-zinc-400 hover:accent-text transition-colors cursor-pointer" title="Çoğalt"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg></button>
                                   <button onClick={() => setActions(actions.filter(a => a.id !== act.id))} className="p-1 text-zinc-400 hover:text-red-400 transition-colors cursor-pointer" title="Sil"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18" /><path d="M6 6 18 18" /></svg></button>
                                 </div>
                               </div>
@@ -2578,16 +2612,16 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                               {renderNestedSlot(act, 'thenActions', {
                                 spineColor: 'border-zinc-600',
                                 bgCavity: 'bg-white/[0.02]',
-                                borderHover: 'border-blue-400',
-                                bgActive: 'bg-blue-500/10',
-                                glowColor: 'rgba(59,130,246,0.15)',
+                                borderHover: 'accent-border',
+                                bgActive: 'accent-bg-soft',
+                                glowColor: 'var(--primary-accent)',
                                 emptyHint: t('action_types.IF_CONDITION.empty_then', language)
                               })}
 
                               {/* ORTA KOL: DEĞİLSE / ELSE (varsa) */}
                               {act.hasElse && (
                                 <>
-                                  <div className="bg-[#1c1c20] border-y border-white/10 p-2.5 flex items-center justify-between text-xs">
+                                  <div className="bg-[#1e1e1e] border-y border-white/10 p-2.5 flex items-center justify-between text-xs">
                                     <div className="flex items-center gap-2">
                                       <span className="px-2.5 py-1 rounded-lg bg-zinc-700 text-zinc-200 font-extrabold tracking-wider text-xs uppercase shadow-sm border border-white/10">
                                         {t('action_types.IF_CONDITION.else_keyword', language)}
@@ -2609,16 +2643,16 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                   {renderNestedSlot(act, 'elseActions', {
                                     spineColor: 'border-zinc-600',
                                     bgCavity: 'bg-white/[0.015]',
-                                    borderHover: 'border-blue-400',
-                                    bgActive: 'bg-blue-500/10',
-                                    glowColor: 'rgba(59,130,246,0.15)',
+                                    borderHover: 'accent-border',
+                                    bgActive: 'accent-bg-soft',
+                                    glowColor: 'var(--primary-accent)',
                                     emptyHint: t('action_types.IF_CONDITION.empty_else', language)
                                   })}
                                 </>
                               )}
 
                               {/* ALT TABAN KAPANISI (BOTTOM CAP OF C-HOOK) */}
-                              <div className="bg-[#141416] border-t border-white/10 py-1.5 px-4 flex items-center justify-between text-[11px] font-mono text-zinc-400">
+                              <div className="bg-[#1e1e1e] border-t border-white/10 py-1.5 px-4 flex items-center justify-between text-[11px] font-mono text-zinc-400">
                                 <span className="flex items-center gap-1.5">
                                   <span>└──</span>
                                   <span className="font-bold tracking-wider">{t('action_types.IF_CONDITION.end_if', language)}</span>
@@ -2635,10 +2669,10 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                           return (
                             <div
                               key={act.id}
-                              className="flex flex-col rounded-2xl overflow-hidden border border-white/10 bg-[#161619] shadow-lg transition-all group"
+                              className="action-card flex flex-col rounded-2xl overflow-hidden border border-white/10 bg-[#1e1e1e] shadow-lg transition-colors group"
                             >
                               {/* ÜST KOL (TOP SHOULDER OF LOOP C-HOOK) */}
-                              <div className="bg-[#1c1c20] border-b border-white/10 p-2.5 sm:p-3 flex flex-wrap items-center justify-between gap-2.5 text-xs">
+                              <div className="bg-[#1e1e1e] border-b border-white/10 p-2.5 sm:p-3 flex flex-wrap items-center justify-between gap-2.5 text-xs">
                                 <div className="flex items-center gap-2 flex-wrap min-w-0">
                                   <span
                                     draggable={true}
@@ -2660,7 +2694,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                   </span>
 
                                   {/* Tekrar Sayısı */}
-                                  <div className="flex items-center bg-[#101012] border border-white/15 focus-within:border-blue-400 rounded-lg px-2.5 py-1 shadow-inner">
+                                  <div className="flex items-center bg-[#101012] border border-white/15 focus-within:accent-border rounded-lg px-2.5 py-1 shadow-inner">
                                     <input
                                       type="number"
                                       min={1}
@@ -2673,7 +2707,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                   </div>
 
                                   {/* Gecikme */}
-                                  <div className="flex items-center bg-[#101012] border border-white/15 focus-within:border-blue-400 rounded-lg px-2.5 py-1 shadow-inner">
+                                  <div className="flex items-center bg-[#101012] border border-white/15 focus-within:accent-border rounded-lg px-2.5 py-1 shadow-inner">
                                     <span className="text-zinc-400 text-xs mr-1.5">{t('action_types.LOOP_REPEAT.delay', language)}:</span>
                                     <input
                                       type="number"
@@ -2690,7 +2724,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                                 <div className="flex items-center gap-1 ml-auto">
                                   <button onClick={() => moveActionUp(idx)} disabled={idx === 0} className="p-1 text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m18 15-6-6-6 6" /></svg></button>
                                   <button onClick={() => moveActionDown(idx)} disabled={idx === actions.length - 1} className="p-1 text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg></button>
-                                  <button onClick={() => duplicateAction(act)} className="p-1 text-zinc-400 hover:text-blue-400 transition-colors cursor-pointer" title="Çoğalt"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg></button>
+                                  <button onClick={() => duplicateAction(act)} className="p-1 text-zinc-400 hover:accent-text transition-colors cursor-pointer" title="Çoğalt"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg></button>
                                   <button onClick={() => setActions(actions.filter(a => a.id !== act.id))} className="p-1 text-zinc-400 hover:text-red-400 transition-colors cursor-pointer" title="Sil"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18" /><path d="M6 6 18 18" /></svg></button>
                                 </div>
                               </div>
@@ -2699,14 +2733,14 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                               {renderNestedSlot(act, 'loopActions', {
                                 spineColor: 'border-zinc-600',
                                 bgCavity: 'bg-white/[0.02]',
-                                borderHover: 'border-blue-400',
-                                bgActive: 'bg-blue-500/10',
-                                glowColor: 'rgba(59,130,246,0.15)',
+                                borderHover: 'accent-border',
+                                bgActive: 'accent-bg-soft',
+                                glowColor: 'var(--primary-accent)',
                                 emptyHint: t('action_types.LOOP_REPEAT.empty_loop', language)
                               })}
 
                               {/* DÖNGÜ ALT TABAN KAPANISI */}
-                              <div className="bg-[#141416] border-t border-white/10 py-1.5 px-4 flex items-center justify-between text-[11px] font-mono text-zinc-400">
+                              <div className="bg-[#1e1e1e] border-t border-white/10 py-1.5 px-4 flex items-center justify-between text-[11px] font-mono text-zinc-400">
                                 <span className="flex items-center gap-1.5">
                                   <span>└──</span>
                                   <span className="font-bold tracking-wider">{t('action_types.LOOP_REPEAT.end_loop', language)}</span>
@@ -2722,7 +2756,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                         return (
                           <div
                             key={act.id}
-                            className="flex flex-col p-3 bg-[#1e1e1e] border border-white/10 hover:border-white/20 rounded-xl group transition-all shadow-md"
+                            className="action-card flex flex-col p-3 bg-[#1e1e1e] border border-white/10 hover:border-white/20 rounded-xl group transition-colors shadow-md"
                           >
                             <div className="flex items-center justify-between mb-2">
                               <div className="flex items-center gap-2">
@@ -2752,30 +2786,22 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                               <div className="flex items-center gap-1">
                                 <button onClick={() => moveActionUp(idx)} disabled={idx === 0} className="p-1 text-zinc-500 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m18 15-6-6-6 6" /></svg></button>
                                 <button onClick={() => moveActionDown(idx)} disabled={idx === actions.length - 1} className="p-1 text-zinc-500 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg></button>
-                                <button onClick={() => duplicateAction(act)} className="p-1 text-zinc-500 hover:text-blue-400 transition-colors cursor-pointer" title="Çoğalt"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg></button>
+                                <button onClick={() => duplicateAction(act)} className="p-1 text-zinc-500 hover:accent-text transition-colors cursor-pointer" title="Çoğalt"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg></button>
                                 <button onClick={() => setActions(actions.filter(a => a.id !== act.id))} className="p-1 text-zinc-500 hover:text-red-400 transition-colors cursor-pointer" title="Sil"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="M6 6 18 18" /></svg></button>
                               </div>
                             </div>
 
-                            <AnimatePresence initial={false}>
-                              {act.expanded && (
-                                <motion.div
-                                  initial={{ height: 0, opacity: 0, marginTop: 0 }}
-                                  animate={{ height: 'auto', opacity: 1, marginTop: 8 }}
-                                  exit={{ height: 0, opacity: 0, marginTop: 0 }}
-                                  transition={{ duration: 0.2 }}
-                                  className="overflow-hidden"
-                                >
-                                  <div className="pl-6 space-y-3">
-                                    {actionDef.fields?.map((field, fIdx) => (
-                                      <div key={field.key || fIdx}>
-                                        {renderFieldInput(act, field, (k, v) => updateAction(act.id, k, v))}
-                                      </div>
-                                    ))}
-                                  </div>
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
+                            {act.expanded && (
+                              <div className="overflow-hidden">
+                                <div className="pl-6 space-y-3 pt-2">
+                                  {actionDef.fields?.map((field, fIdx) => (
+                                    <div key={field.key || fIdx}>
+                                      {renderFieldInput(act, field, (k, v) => updateAction(act.id, k, v))}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -2787,36 +2813,87 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
 
             {/* --- BINDING TAB --- */}
             {activeTab === 'binding' && (
-              <div className="min-h-full flex flex-col items-center justify-center animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <div className="flex flex-col items-center justify-center w-full max-w-md space-y-6 py-8">
-                  <div className={`w-32 h-32 sm:w-40 sm:h-40 rounded-3xl flex flex-col items-center justify-center border-2 transition-all duration-300 ${isRecording
-                    ? 'border-blue-500 bg-blue-500/10 animate-pulse shadow-[0_0_30px_rgba(59,130,246,0.2)]'
-                    : assignedKey && assignedKey.startsWith('Key:')
-                      ? 'border-green-500 bg-green-500/10 shadow-[0_0_30px_rgba(34,197,94,0.2)] scale-105'
-                      : 'border-white/10 bg-[#121212]'
-                    }`}>
-                    {isRecording ? (
-                      <>
-                        <svg className="w-10 h-10 text-blue-500 animate-spin mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                        <span className="text-xs font-bold text-blue-400 uppercase tracking-widest animate-pulse">{t('editor.binding.waiting', language)}</span>
-                      </>
-                    ) : assignedKey && assignedKey.startsWith('Key:') ? (
-                      <>
-                        <span className="text-4xl font-black text-green-400 mb-2 drop-shadow-md">{assignedKey.replace('Key: ', '')}</span>
-                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-500/20 border border-green-500/30">
-                          <svg className="w-3 h-3 text-green-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                          <span className="text-[10px] font-bold text-green-400 uppercase tracking-widest">{t('editor.binding.assigned', language)}</span>
-                        </div>
-                      </>
-                    ) : (
-                      <span className="text-3xl font-bold text-zinc-700">{t('editor.binding.none', language)}</span>
-                    )}
+              <div className="min-h-full flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <div className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center gap-4 pb-4 pt-1">
+
+                  {/* Status badge */}
+                  <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${
+                    isRecording
+                      ? 'accent-border-soft accent-bg-faint accent-text'
+                      : hasAssignedKey
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                        : 'border-white/10 bg-white/5 text-zinc-500'
+                  }`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${isRecording ? 'accent-bg animate-pulse' : hasAssignedKey ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
+                    {isRecording
+                      ? t('editor.binding.waiting', language)
+                      : hasAssignedKey
+                        ? t('editor.binding.assigned', language)
+                        : t('editor.binding.key_combo', language)}
                   </div>
 
-                  <div className="w-full max-w-xs bg-[#121212] rounded-lg border border-white/5 px-3 py-2.5 flex items-center justify-between gap-3">
+                  {/* Keycap */}
+                  <button
+                    type="button"
+                    onClick={handleRecordingToggle}
+                    title={isRecording ? t('editor.binding.cancel', language) : t('editor.binding.start_rec', language)}
+                    aria-label={isRecording ? t('editor.binding.cancel', language) : t('editor.binding.start_rec', language)}
+                    className={`group relative mt-1 flex h-40 w-40 shrink-0 cursor-pointer select-none flex-col items-center justify-center gap-2 rounded-[2rem] border-2 border-b-[7px] px-4 transition-all duration-200 active:translate-y-0.5 active:border-b-2 sm:h-48 sm:w-48 ${
+                      isRecording
+                        ? 'accent-border accent-bg-soft accent-glow'
+                        : hasAssignedKey
+                          ? 'border-emerald-500/60 bg-emerald-500/10 shadow-[0_18px_40px_-18px_rgba(16,185,129,0.55)]'
+                          : 'border-white/10 bg-[#1e1e1e] shadow-[0_18px_40px_-18px_rgba(0,0,0,0.65)] hover:border-white/20'
+                    }`}
+                  >
+                    {isRecording ? (
+                      <>
+                        <svg className="h-9 w-9 accent-text animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        <span className="text-[11px] font-bold uppercase tracking-[0.2em] accent-text animate-pulse">
+                          {t('editor.binding.press_key', language)}
+                        </span>
+                      </>
+                    ) : hasAssignedKey ? (
+                      <>
+                        <span className="max-w-full break-all text-center font-mono text-4xl font-black leading-none text-emerald-400 sm:text-5xl">
+                          {assignedKeyLabel}
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-400">
+                          <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                          {t('editor.binding.assigned', language)}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="h-9 w-9 text-zinc-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></svg>
+                        <span className="font-mono text-4xl font-black leading-none text-zinc-600">{t('editor.binding.none', language)}</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Copy */}
+                  <div className="space-y-1.5 text-center">
+                    <h3 className="text-base font-semibold text-white">
+                      {isRecording
+                        ? t('editor.binding.press_key', language)
+                        : hasAssignedKey
+                          ? t('editor.binding.key_defined', language)
+                          : t('editor.binding.key_combo', language)}
+                    </h3>
+                    <p className="mx-auto max-w-sm text-xs leading-relaxed text-zinc-500">
+                      {isRecording
+                        ? t('editor.binding.desc_recording', language)
+                        : hasAssignedKey
+                          ? t('editor.binding.desc_assigned', language)
+                          : t('editor.binding.desc_default', language)}
+                    </p>
+                  </div>
+
+                  {/* Hold mode */}
+                  <div className="flex w-full max-w-md items-center justify-between gap-3 rounded-xl border border-white/5 bg-[#121212] px-3 py-2.5">
                     <div className="min-w-0">
                       <h4 className="text-xs font-medium text-zinc-200">{t('editor.binding.hold_mode', language)}</h4>
-                      <p className="text-[10px] text-zinc-500 mt-0.5 leading-snug">{t('editor.binding.hold_mode_desc', language)}</p>
+                      <p className="mt-0.5 text-[10px] leading-snug text-zinc-500">{t('editor.binding.hold_mode_desc', language)}</p>
                     </div>
                     <button
                       type="button"
@@ -2825,44 +2902,52 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                       aria-label={t('editor.binding.hold_mode', language)}
                       title={t('editor.binding.hold_mode_desc', language)}
                       onClick={() => setHoldMode(!holdMode)}
-                      className={`w-9 h-5 rounded-full relative transition-colors cursor-pointer shrink-0 ${holdMode ? 'bg-blue-600' : 'bg-zinc-700'}`}
+                      className={`relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors ${holdMode ? 'accent-bg' : 'bg-zinc-700'}`}
                     >
-                      <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${holdMode ? 'right-0.5' : 'left-0.5'}`} />
+                      <div className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all ${holdMode ? 'right-0.5' : 'left-0.5'}`} />
                     </button>
                   </div>
 
+                  {/* Technical details */}
                   {!isRecording && bindingData && (
-                    <div className="w-full max-w-xs bg-[#121212] rounded-lg border border-white/5 p-3 space-y-2">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-zinc-500 font-bold">{t('editor.binding.handler_id', language)}</span>
-                        <span className="text-zinc-300 bg-white/5 px-2 py-0.5 rounded">{bindingData.handler}</span>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">{t('editor.binding.hid_path', language)}</span>
-                        <p className="text-[10px] text-zinc-400 break-all bg-black/20 p-2 rounded border border-white/5 leading-relaxed">
-                          {bindingData.hid}
-                        </p>
-                      </div>
+                    <div className="w-full max-w-md overflow-hidden rounded-xl border border-white/5 bg-[#121212]">
+                      <button
+                        type="button"
+                        onClick={() => setShowBindingDetails(value => !value)}
+                        aria-expanded={showBindingDetails}
+                        className="flex w-full cursor-pointer items-center justify-between gap-3 px-3 py-2.5 text-left"
+                      >
+                        <span className="flex items-center gap-2 text-xs font-medium text-zinc-300">
+                          <svg className="h-3.5 w-3.5 text-zinc-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+                          {t('editor.binding.details', language)}
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <span className="rounded bg-white/5 px-2 py-0.5 font-mono text-[10px] text-zinc-400">{bindingData.handler}</span>
+                          <svg className={`h-3.5 w-3.5 text-zinc-500 transition-transform ${showBindingDetails ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+                        </span>
+                      </button>
+                      {showBindingDetails && (
+                        <div className="space-y-2.5 border-t border-white/5 px-3 py-3">
+                          <div className="flex items-center justify-between gap-3 text-xs">
+                            <span className="font-bold text-zinc-500">{t('editor.binding.handler_id', language)}</span>
+                            <span className="rounded bg-white/5 px-2 py-0.5 font-mono text-zinc-300">{bindingData.handler}</span>
+                          </div>
+                          <div className="space-y-1">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">{t('editor.binding.hid_path', language)}</span>
+                            <p className="break-all rounded border border-white/5 bg-black/20 p-2 text-[10px] leading-relaxed text-zinc-400">
+                              {bindingData.hid}
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 
-                  <div className="text-center space-y-2">
-                    <h3 className="text-lg font-medium text-white">
-                      {isRecording ? t('editor.binding.press_key', language) : assignedKey && assignedKey.startsWith('Key:') ? t('editor.binding.key_defined', language) : t('editor.binding.key_combo', language)}
-                    </h3>
-                    <p className="text-sm text-zinc-500 max-w-xs mx-auto">
-                      {isRecording
-                        ? t('editor.binding.desc_recording', language)
-                        : assignedKey && assignedKey.startsWith('Key:')
-                          ? t('editor.binding.desc_assigned', language)
-                          : t('editor.binding.desc_default', language)}
-                    </p>
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-center gap-3">
+                  {/* Primary actions */}
+                  <div className="sticky bottom-0 z-10 mt-auto flex w-full max-w-md flex-wrap items-center justify-center gap-2.5 border-t border-white/5 bg-[#1e1e1e] px-2 py-3">
                     <button
                       onClick={handleRecordingToggle}
-                      className={`px-8 py-3 rounded-xl font-bold text-sm transition-all cursor-pointer ${isRecording ? 'bg-red-500/10 text-red-500 border border-red-500/50' : 'bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-600/20'}`}
+                      className={`min-w-[150px] flex-1 rounded-xl px-6 py-2.5 text-sm font-bold transition-all cursor-pointer ${isRecording ? 'border border-red-500/50 bg-red-500/10 text-red-500' : 'accent-bg text-white shadow-lg accent-shadow hover:brightness-110'}`}
                     >
                       {isRecording ? t('editor.binding.cancel', language) : t('editor.binding.start_rec', language)}
                     </button>
@@ -2870,7 +2955,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                     {!isRecording && (bindingData || assignedKey) && (
                       <button
                         onClick={handleRemoveBinding}
-                        className="px-6 py-3 rounded-xl font-bold text-sm bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 hover:border-red-500/40 transition-all cursor-pointer flex items-center gap-2"
+                        className="flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-5 py-2.5 text-sm font-bold text-red-400 transition-all hover:border-red-500/40 hover:bg-red-500/20 cursor-pointer"
                       >
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="M6 6 18 18"/></svg>
                         {t('editor.binding.remove', language)}
@@ -2891,7 +2976,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                   </div>
                   <button
                     onClick={() => setShowTitle(!showTitle)}
-                    className={`w-10 h-6 rounded-full relative transition-colors cursor-pointer ${showTitle ? 'bg-blue-600' : 'bg-zinc-700'}`}
+                    className={`w-10 h-6 rounded-full relative transition-colors cursor-pointer ${showTitle ? 'accent-bg' : 'bg-zinc-700'}`}
                   >
                     <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${showTitle ? 'right-1' : 'left-1'}`} />
                   </button>
@@ -2904,7 +2989,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                   </div>
                   <button
                     onClick={() => setHapticFeedback(!hapticFeedback)}
-                    className={`w-10 h-6 rounded-full relative transition-colors cursor-pointer ${hapticFeedback ? 'bg-blue-600' : 'bg-zinc-700'}`}
+                    className={`w-10 h-6 rounded-full relative transition-colors cursor-pointer ${hapticFeedback ? 'accent-bg' : 'bg-zinc-700'}`}
                   >
                     <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${hapticFeedback ? 'right-1' : 'left-1'}`} />
                   </button>
@@ -2919,7 +3004,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                     </div>
                     <button
                       onClick={() => setSoundFeedback(!soundFeedback)}
-                      className={`w-10 h-6 rounded-full relative transition-colors cursor-pointer ${soundFeedback ? 'bg-blue-600' : 'bg-zinc-700'}`}
+                      className={`w-10 h-6 rounded-full relative transition-colors cursor-pointer ${soundFeedback ? 'accent-bg' : 'bg-zinc-700'}`}
                     >
                       <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${soundFeedback ? 'right-1' : 'left-1'}`} />
                     </button>
@@ -2944,7 +3029,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                         <select
                           value={customSound}
                           onChange={(e) => setCustomSound(e.target.value)}
-                          className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500/50 cursor-pointer truncate"
+                          className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:accent-border cursor-pointer truncate"
                         >
                           <option value="">{t('editor.settings.default_sound_opt', language)} ({settings?.selectedSound || 'click.wav'})</option>
                           {customSounds && customSounds.map((snd) => (
@@ -2967,7 +3052,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                         <button
                           type="button"
                           onClick={() => handlePlayPreviewSound(customSound)}
-                          className="p-2 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 hover:text-blue-300 transition-colors cursor-pointer shrink-0"
+                          className="p-2 rounded-lg accent-bg-soft hover:brightness-110/30 accent-text hover:accent-text transition-colors cursor-pointer shrink-0"
                           title={language === 'tr' ? 'Sesi Dinle' : 'Test Sound'}
                         >
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
@@ -2985,7 +3070,7 @@ export default function ActionEditor({ isOpen, onClose, buttonIndex, onSave, ini
                   </div>
                   <button
                     onClick={() => setDisableDynamicState(!disableDynamicState)}
-                    className={`w-10 h-6 rounded-full relative transition-colors cursor-pointer ${!disableDynamicState ? 'bg-blue-600' : 'bg-zinc-700'}`}
+                    className={`w-10 h-6 rounded-full relative transition-colors cursor-pointer ${!disableDynamicState ? 'accent-bg' : 'bg-zinc-700'}`}
                   >
                     <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${!disableDynamicState ? 'right-1' : 'left-1'}`} />
                   </button>

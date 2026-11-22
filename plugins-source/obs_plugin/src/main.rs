@@ -1,16 +1,185 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
-use tokio_tungstenite::connect_async;
-use tungstenite::protocol::Message;
+use tokio::sync::oneshot;
+use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+
+type ObsRequest = (String, Value, oneshot::Sender<Value>);
+
+fn parse_port(value: Option<&Value>) -> Result<Option<u16>, String> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+
+    let port = match value {
+        Value::Number(number) => number
+            .as_u64()
+            .ok_or_else(|| "OBS WebSocket port must be a positive integer".to_string())?,
+        Value::String(text) => text
+            .parse::<u64>()
+            .map_err(|_| "OBS WebSocket port must be a positive integer".to_string())?,
+        _ => return Err("OBS WebSocket port must be a number or numeric string".to_string()),
+    };
+
+    let port = u16::try_from(port)
+        .ok()
+        .filter(|port| *port != 0)
+        .ok_or_else(|| "OBS WebSocket port must be between 1 and 65535".to_string())?;
+    Ok(Some(port))
+}
+
+fn obs_websocket_url(host: &str, port: u16) -> String {
+    let host = if host.parse::<std::net::Ipv6Addr>().is_ok() {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    };
+    format!("ws://{host}:{port}")
+}
+
+fn obs_response_error(response: &Value) -> Option<String> {
+    let status = response.get("requestStatus")?;
+    if status.get("result").and_then(Value::as_bool) != Some(false) {
+        return None;
+    }
+
+    let comment = status
+        .get("comment")
+        .and_then(Value::as_str)
+        .filter(|comment| !comment.is_empty());
+    let code = status.get("code").and_then(Value::as_u64);
+    Some(match (comment, code) {
+        (Some(comment), Some(code)) => format!("OBS request failed ({code}): {comment}"),
+        (Some(comment), None) => format!("OBS request failed: {comment}"),
+        (None, Some(code)) => format!("OBS request failed with code {code}"),
+        (None, None) => "OBS request failed".to_string(),
+    })
+}
+
+fn parse_mute_state(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Bool(value)) => *value,
+        Some(Value::String(value)) => {
+            matches!(value.to_ascii_lowercase().as_str(), "mute" | "true")
+        }
+        _ => true,
+    }
+}
+
+fn parse_visibility(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Bool(value)) => *value,
+        Some(Value::String(value)) => {
+            !matches!(value.to_ascii_lowercase().as_str(), "hide" | "false")
+        }
+        _ => true,
+    }
+}
+
+fn parse_volume_percent(value: Option<&Value>) -> Result<f64, String> {
+    let Some(value) = value else {
+        return Ok(100.0);
+    };
+    let value = match value {
+        Value::Number(number) => number.as_f64(),
+        Value::String(text) => text.parse::<f64>().ok(),
+        _ => None,
+    }
+    .filter(|value| value.is_finite() && (0.0..=100.0).contains(value))
+    .ok_or_else(|| "Volume must be a number between 0 and 100".to_string())?;
+    Ok(value)
+}
+
+fn screenshot_path(timestamp: u64) -> Result<PathBuf, String> {
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .ok_or_else(|| "Unable to locate the user home directory".to_string())?;
+    let pictures = PathBuf::from(home).join("Pictures");
+    if !pictures.is_dir() {
+        return Err(format!(
+            "Pictures folder does not exist: {}",
+            pictures.display()
+        ));
+    }
+    Ok(pictures.join(format!("obs_screenshot_{timestamp}.png")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parses_valid_ports_without_truncating() {
+        assert_eq!(parse_port(None).unwrap(), None);
+        assert_eq!(parse_port(Some(&json!(4455))).unwrap(), Some(4455));
+        assert_eq!(parse_port(Some(&json!("4455"))).unwrap(), Some(4455));
+        assert!(parse_port(Some(&json!(0))).is_err());
+        assert!(parse_port(Some(&json!(65536))).is_err());
+        assert!(parse_port(Some(&json!(-1))).is_err());
+        assert!(parse_port(Some(&json!("not-a-port"))).is_err());
+    }
+
+    #[test]
+    fn formats_ipv6_websocket_endpoints() {
+        assert_eq!(obs_websocket_url("127.0.0.1", 4455), "ws://127.0.0.1:4455");
+        assert_eq!(obs_websocket_url("::1", 4455), "ws://[::1]:4455");
+    }
+
+    #[test]
+    fn reports_obs_request_failures() {
+        assert_eq!(
+            obs_response_error(&json!({"requestStatus": {"result": true}})),
+            None
+        );
+        assert_eq!(
+            obs_response_error(
+                &json!({"requestStatus": {"result": false, "code": 600, "comment": "Not found"}})
+            ),
+            Some("OBS request failed (600): Not found".to_string())
+        );
+        assert_eq!(
+            obs_response_error(&json!({"requestStatus": {"result": false}})),
+            Some("OBS request failed".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_boolean_action_values() {
+        assert!(parse_mute_state(None));
+        assert!(parse_mute_state(Some(&json!("mute"))));
+        assert!(!parse_mute_state(Some(&json!("unmute"))));
+        assert!(parse_mute_state(Some(&json!(true))));
+        assert!(!parse_mute_state(Some(&json!(false))));
+
+        assert!(parse_visibility(None));
+        assert!(parse_visibility(Some(&json!("show"))));
+        assert!(!parse_visibility(Some(&json!("hide"))));
+        assert!(parse_visibility(Some(&json!(true))));
+        assert!(!parse_visibility(Some(&json!(false))));
+    }
+
+    #[test]
+    fn validates_volume_percent() {
+        assert_eq!(parse_volume_percent(None).unwrap(), 100.0);
+        assert_eq!(parse_volume_percent(Some(&json!(0))).unwrap(), 0.0);
+        assert_eq!(parse_volume_percent(Some(&json!("45.5"))).unwrap(), 45.5);
+        assert_eq!(parse_volume_percent(Some(&json!(100))).unwrap(), 100.0);
+        assert!(parse_volume_percent(Some(&json!(-1))).is_err());
+        assert!(parse_volume_percent(Some(&json!(101))).is_err());
+        assert!(parse_volume_percent(Some(&json!("NaN"))).is_err());
+        assert!(parse_volume_percent(Some(&json!("loud"))).is_err());
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DataListItem {
@@ -28,7 +197,7 @@ struct ObsClient {
     scenes: Arc<Mutex<Vec<String>>>,
     inputs: Arc<Mutex<Vec<(String, String)>>>,
     current_scene: Arc<Mutex<String>>,
-    request_tx: Arc<Mutex<Option<mpsc::UnboundedSender<(String, Value, tokio::sync::oneshot::Sender<Value>)>>>>,
+    request_tx: Arc<Mutex<Option<mpsc::UnboundedSender<ObsRequest>>>>,
     config: Arc<Mutex<(String, u16, String)>>,
     reconnect_notify: Arc<tokio::sync::Notify>,
     stdout_tx: mpsc::UnboundedSender<String>,
@@ -64,23 +233,21 @@ impl ObsClient {
         let mut cfg = self.config.lock().unwrap();
         let mut changed = false;
         if let Some(ip) = config_val.get("ip").and_then(|v| v.as_str()) {
-            if cfg.0 != ip {
+            let ip = ip.trim();
+            if ip.is_empty() || ip.chars().any(char::is_whitespace) {
+                eprintln!("[OBS PLUGIN] Ignoring invalid OBS host.");
+            } else if cfg.0 != ip {
                 cfg.0 = ip.to_string();
                 changed = true;
             }
         }
-        if let Some(port) = config_val.get("port").and_then(|v| v.as_u64()) {
-            if cfg.1 != port as u16 {
-                cfg.1 = port as u16;
+        match parse_port(config_val.get("port")) {
+            Ok(Some(port)) if cfg.1 != port => {
+                cfg.1 = port;
                 changed = true;
             }
-        } else if let Some(port_str) = config_val.get("port").and_then(|v| v.as_str()) {
-            if let Ok(p) = port_str.parse::<u16>() {
-                if cfg.1 != p {
-                    cfg.1 = p;
-                    changed = true;
-                }
-            }
+            Ok(_) => {}
+            Err(error) => eprintln!("[OBS PLUGIN] Ignoring invalid OBS port: {error}"),
         }
         if let Some(pw) = config_val.get("password").and_then(|v| v.as_str()) {
             if cfg.2 != pw {
@@ -95,7 +262,11 @@ impl ObsClient {
         }
     }
 
-    async fn send_obs_request(&self, request_type: &str, request_data: Value) -> Result<Value, String> {
+    async fn send_obs_request(
+        &self,
+        request_type: &str,
+        request_data: Value,
+    ) -> Result<Value, String> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let sender = {
             let lock = self.request_tx.lock().unwrap();
@@ -106,7 +277,10 @@ impl ObsClient {
             s.send((request_type.to_string(), request_data, tx))
                 .map_err(|e| e.to_string())?;
             match tokio::time::timeout(Duration::from_secs(4), rx).await {
-                Ok(Ok(val)) => Ok(val),
+                Ok(Ok(val)) => match obs_response_error(&val) {
+                    Some(error) => Err(error),
+                    None => Ok(val),
+                },
                 Ok(Err(e)) => Err(e.to_string()),
                 Err(_) => Err("Request timed out".to_string()),
             }
@@ -123,21 +297,22 @@ impl ObsClient {
                     cfg.clone()
                 };
 
-                let url = format!("ws://{}:{}", ip, port);
+                let url = obs_websocket_url(&ip, port);
                 eprintln!("[OBS PLUGIN] Connecting to OBS WebSocket at {}...", url);
 
                 match connect_async(&url).await {
                     Ok((ws_stream, _)) => {
                         eprintln!("[OBS PLUGIN] WebSocket connection established. Initiating handshake...");
                         let (mut write, mut read) = ws_stream.split();
-                        let (req_tx, mut req_rx) = mpsc::unbounded_channel::<(String, Value, tokio::sync::oneshot::Sender<Value>)>();
+                        let (req_tx, mut req_rx) = mpsc::unbounded_channel::<ObsRequest>();
 
                         {
                             let mut lock = self.request_tx.lock().unwrap();
                             *lock = Some(req_tx);
                         }
 
-                        let mut pending_map: HashMap<String, tokio::sync::oneshot::Sender<Value>> = HashMap::new();
+                        let mut pending_map: HashMap<String, tokio::sync::oneshot::Sender<Value>> =
+                            HashMap::new();
                         let mut req_counter: u64 = 1;
 
                         loop {
@@ -161,7 +336,11 @@ impl ObsClient {
                                         }
                                     });
 
-                                    let _ = write.send(Message::Text(msg_payload.to_string())).await;
+                                    if let Err(error) = write.send(Message::Text(msg_payload.to_string())).await {
+                                        eprintln!("[OBS PLUGIN] Failed to send OBS request: {error}");
+                                        pending_map.remove(&req_id);
+                                        break;
+                                    }
                                 }
 
                                 msg = read.next() => {
@@ -500,8 +679,7 @@ impl ObsClient {
                                                                 };
                                                                 self.emit_state_update("toggle_studio_mode", serde_json::json!({}), state, false);
                                                             }
-                                                        } else if req_id.starts_with("init_mute_") {
-                                                            let input_name = &req_id["init_mute_".len()..];
+                                                        } else if let Some(input_name) = req_id.strip_prefix("init_mute_") {
                                                             if let Some(muted) = resp_d.get("responseData").and_then(|v| v.get("inputMuted")).and_then(|v| v.as_bool()) {
                                                                 let state = if muted {
                                                                     serde_json::json!({ "active": true, "badge": "MUTE", "color": "#ef4444" })
@@ -539,10 +717,15 @@ impl ObsClient {
                             let mut lock = self.request_tx.lock().unwrap();
                             *lock = None;
                         }
-                        eprintln!("[OBS PLUGIN] OBS WebSocket connection lost. Reconnecting in 3s...");
+                        eprintln!(
+                            "[OBS PLUGIN] OBS WebSocket connection lost. Reconnecting in 3s..."
+                        );
                     }
                     Err(err) => {
-                        eprintln!("[OBS PLUGIN] Connection to OBS failed ({}). Retrying in 3s...", err);
+                        eprintln!(
+                            "[OBS PLUGIN] Connection to OBS failed ({}). Retrying in 3s...",
+                            err
+                        );
                     }
                 }
 
@@ -620,11 +803,20 @@ async fn main() {
                         };
 
                         if cached.is_empty() {
-                            if let Ok(resp) = client.send_obs_request("GetSceneList", serde_json::json!({})).await {
-                                if let Some(arr) = resp.get("responseData").and_then(|v| v.get("scenes")).and_then(|v| v.as_array()) {
+                            if let Ok(resp) = client
+                                .send_obs_request("GetSceneList", serde_json::json!({}))
+                                .await
+                            {
+                                if let Some(arr) = resp
+                                    .get("responseData")
+                                    .and_then(|v| v.get("scenes"))
+                                    .and_then(|v| v.as_array())
+                                {
                                     let mut list = Vec::new();
                                     for s in arr {
-                                        if let Some(name) = s.get("sceneName").and_then(|v| v.as_str()) {
+                                        if let Some(name) =
+                                            s.get("sceneName").and_then(|v| v.as_str())
+                                        {
                                             list.push(name.to_string());
                                         }
                                     }
@@ -635,12 +827,15 @@ async fn main() {
                             }
                         }
 
-                        items = cached.into_iter().map(|s| DataListItem {
-                            id: s.clone(),
-                            label: s,
-                            description: "OBS Scene".to_string(),
-                            image: None,
-                        }).collect();
+                        items = cached
+                            .into_iter()
+                            .map(|s| DataListItem {
+                                id: s.clone(),
+                                label: s,
+                                description: "OBS Scene".to_string(),
+                                image: None,
+                            })
+                            .collect();
                     } else if is_inputs {
                         let mut cached = {
                             let lock = client.inputs.lock().unwrap();
@@ -648,12 +843,25 @@ async fn main() {
                         };
 
                         if cached.is_empty() {
-                            if let Ok(resp) = client.send_obs_request("GetInputList", serde_json::json!({})).await {
-                                if let Some(arr) = resp.get("responseData").and_then(|v| v.get("inputs")).and_then(|v| v.as_array()) {
+                            if let Ok(resp) = client
+                                .send_obs_request("GetInputList", serde_json::json!({}))
+                                .await
+                            {
+                                if let Some(arr) = resp
+                                    .get("responseData")
+                                    .and_then(|v| v.get("inputs"))
+                                    .and_then(|v| v.as_array())
+                                {
                                     let mut list = Vec::new();
                                     for i in arr {
-                                        let name = i.get("inputName").and_then(|v| v.as_str()).unwrap_or("");
-                                        let kind = i.get("inputKind").and_then(|v| v.as_str()).unwrap_or("Audio Source");
+                                        let name = i
+                                            .get("inputName")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        let kind = i
+                                            .get("inputKind")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("Audio Source");
                                         if !name.is_empty() {
                                             list.push((name.to_string(), kind.to_string()));
                                         }
@@ -665,30 +873,57 @@ async fn main() {
                             }
                         }
 
-                        items = cached.into_iter().map(|(name, kind)| DataListItem {
-                            id: name.clone(),
-                            label: name,
-                            description: kind,
-                            image: None,
-                        }).collect();
+                        items = cached
+                            .into_iter()
+                            .map(|(name, kind)| DataListItem {
+                                id: name.clone(),
+                                label: name,
+                                description: kind,
+                                image: None,
+                            })
+                            .collect();
                     } else if is_scene_items {
-                        let target_scene = args.get("sceneName")
+                        let target_scene = args
+                            .get("sceneName")
                             .and_then(|v| v.as_str())
                             .map(|s| s.to_string())
                             .unwrap_or_else(|| client.current_scene.lock().unwrap().clone());
 
                         if !target_scene.is_empty() {
-                            if let Ok(resp) = client.send_obs_request("GetSceneItemList", serde_json::json!({ "sceneName": target_scene })).await {
-                                if let Some(arr) = resp.get("responseData").and_then(|v| v.get("sceneItems")).and_then(|v| v.as_array()) {
+                            if let Ok(resp) = client
+                                .send_obs_request(
+                                    "GetSceneItemList",
+                                    serde_json::json!({ "sceneName": target_scene }),
+                                )
+                                .await
+                            {
+                                if let Some(arr) = resp
+                                    .get("responseData")
+                                    .and_then(|v| v.get("sceneItems"))
+                                    .and_then(|v| v.as_array())
+                                {
                                     for item in arr {
-                                        let source_name = item.get("sourceName").and_then(|v| v.as_str()).unwrap_or("");
-                                        let item_id = item.get("sceneItemId").and_then(|v| v.as_i64()).unwrap_or(0);
-                                        let source_type = item.get("inputKind").or_else(|| item.get("sourceType")).and_then(|v| v.as_str()).unwrap_or("Scene Item");
+                                        let source_name = item
+                                            .get("sourceName")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        let item_id = item
+                                            .get("sceneItemId")
+                                            .and_then(|v| v.as_i64())
+                                            .unwrap_or(0);
+                                        let source_type = item
+                                            .get("inputKind")
+                                            .or_else(|| item.get("sourceType"))
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("Scene Item");
                                         if !source_name.is_empty() {
                                             items.push(DataListItem {
                                                 id: source_name.to_string(),
                                                 label: format!("{} (ID: {})", source_name, item_id),
-                                                description: format!("Scene: {} [{}]", target_scene, source_type),
+                                                description: format!(
+                                                    "Scene: {} [{}]",
+                                                    target_scene, source_type
+                                                ),
                                                 image: None,
                                             });
                                         }
@@ -714,7 +949,8 @@ async fn main() {
 
                     let (success, message) = match action {
                         "change_scene" | "obs_set_scene" => {
-                            let target = args.get("sceneName")
+                            let target = args
+                                .get("sceneName")
                                 .or_else(|| args.get("targetScene"))
                                 .or_else(|| args.get("scene"))
                                 .or_else(|| args.get("target"))
@@ -723,13 +959,27 @@ async fn main() {
                             if target.is_empty() {
                                 (false, "No scene name specified".to_string())
                             } else {
-                                match client.send_obs_request("SetCurrentProgramScene", serde_json::json!({ "sceneName": target })).await {
+                                match client
+                                    .send_obs_request(
+                                        "SetCurrentProgramScene",
+                                        serde_json::json!({ "sceneName": target }),
+                                    )
+                                    .await
+                                {
                                     Ok(resp) => {
-                                        let ok = resp.get("requestStatus").and_then(|s| s.get("result")).and_then(|r| r.as_bool()).unwrap_or(true);
+                                        let ok = resp
+                                            .get("requestStatus")
+                                            .and_then(|s| s.get("result"))
+                                            .and_then(|r| r.as_bool())
+                                            .unwrap_or(true);
                                         if ok {
                                             (true, format!("Scene changed to: {}", target))
                                         } else {
-                                            let comment = resp.get("requestStatus").and_then(|s| s.get("comment")).and_then(|c| c.as_str()).unwrap_or("OBS request failed");
+                                            let comment = resp
+                                                .get("requestStatus")
+                                                .and_then(|s| s.get("comment"))
+                                                .and_then(|c| c.as_str())
+                                                .unwrap_or("OBS request failed");
                                             (false, format!("OBS Error: {}", comment))
                                         }
                                     }
@@ -739,7 +989,8 @@ async fn main() {
                         }
 
                         "set_preview_scene" => {
-                            let target = args.get("sceneName")
+                            let target = args
+                                .get("sceneName")
                                 .or_else(|| args.get("targetScene"))
                                 .or_else(|| args.get("scene"))
                                 .and_then(|v| v.as_str())
@@ -747,7 +998,13 @@ async fn main() {
                             if target.is_empty() {
                                 (false, "No preview scene specified".to_string())
                             } else {
-                                match client.send_obs_request("SetCurrentPreviewScene", serde_json::json!({ "sceneName": target })).await {
+                                match client
+                                    .send_obs_request(
+                                        "SetCurrentPreviewScene",
+                                        serde_json::json!({ "sceneName": target }),
+                                    )
+                                    .await
+                                {
                                     Ok(_) => (true, format!("Preview scene set to: {}", target)),
                                     Err(e) => (false, format!("OBS Error: {}", e)),
                                 }
@@ -755,7 +1012,8 @@ async fn main() {
                         }
 
                         "toggle_mute" | "obs_toggle_mute" => {
-                            let input = args.get("inputName")
+                            let input = args
+                                .get("inputName")
                                 .or_else(|| args.get("input"))
                                 .or_else(|| args.get("source"))
                                 .and_then(|v| v.as_str())
@@ -763,7 +1021,13 @@ async fn main() {
                             if input.is_empty() {
                                 (false, "No audio input specified".to_string())
                             } else {
-                                match client.send_obs_request("ToggleInputMute", serde_json::json!({ "inputName": input })).await {
+                                match client
+                                    .send_obs_request(
+                                        "ToggleInputMute",
+                                        serde_json::json!({ "inputName": input }),
+                                    )
+                                    .await
+                                {
                                     Ok(_) => (true, format!("Mute toggled for: {}", input)),
                                     Err(e) => (false, format!("OBS Error: {}", e)),
                                 }
@@ -771,13 +1035,13 @@ async fn main() {
                         }
 
                         "set_mute" | "obs_set_mute" => {
-                            let input = args.get("inputName")
+                            let input = args
+                                .get("inputName")
                                 .or_else(|| args.get("input"))
                                 .or_else(|| args.get("source"))
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("");
-                            let state_str = args.get("muteState").and_then(|v| v.as_str()).unwrap_or("mute");
-                            let should_mute = state_str == "mute" || state_str == "true" || args.get("muteState").and_then(|v| v.as_bool()).unwrap_or(false);
+                            let should_mute = parse_mute_state(args.get("muteState"));
                             if input.is_empty() {
                                 (false, "No audio input specified".to_string())
                             } else {
@@ -789,169 +1053,260 @@ async fn main() {
                         }
 
                         "toggle_record" | "obs_toggle_record" => {
-                            match client.send_obs_request("ToggleRecord", serde_json::json!({})).await {
+                            match client
+                                .send_obs_request("ToggleRecord", serde_json::json!({}))
+                                .await
+                            {
                                 Ok(_) => (true, "Recording toggled".to_string()),
                                 Err(e) => (false, format!("OBS Error: {}", e)),
                             }
                         }
 
                         "start_record" | "obs_start_record" => {
-                            match client.send_obs_request("StartRecord", serde_json::json!({})).await {
+                            match client
+                                .send_obs_request("StartRecord", serde_json::json!({}))
+                                .await
+                            {
                                 Ok(_) => (true, "Recording started".to_string()),
                                 Err(e) => (false, format!("OBS Error: {}", e)),
                             }
                         }
 
                         "stop_record" | "obs_stop_record" => {
-                            match client.send_obs_request("StopRecord", serde_json::json!({})).await {
+                            match client
+                                .send_obs_request("StopRecord", serde_json::json!({}))
+                                .await
+                            {
                                 Ok(_) => (true, "Recording stopped".to_string()),
                                 Err(e) => (false, format!("OBS Error: {}", e)),
                             }
                         }
 
                         "toggle_record_pause" | "obs_toggle_record_pause" => {
-                            match client.send_obs_request("ToggleRecordPause", serde_json::json!({})).await {
+                            match client
+                                .send_obs_request("ToggleRecordPause", serde_json::json!({}))
+                                .await
+                            {
                                 Ok(_) => (true, "Record pause toggled".to_string()),
                                 Err(e) => (false, format!("OBS Error: {}", e)),
                             }
                         }
 
                         "toggle_stream" | "obs_toggle_stream" => {
-                            match client.send_obs_request("ToggleStream", serde_json::json!({})).await {
+                            match client
+                                .send_obs_request("ToggleStream", serde_json::json!({}))
+                                .await
+                            {
                                 Ok(_) => (true, "Streaming toggled".to_string()),
                                 Err(e) => (false, format!("OBS Error: {}", e)),
                             }
                         }
 
                         "start_stream" | "obs_start_stream" => {
-                            match client.send_obs_request("StartStream", serde_json::json!({})).await {
+                            match client
+                                .send_obs_request("StartStream", serde_json::json!({}))
+                                .await
+                            {
                                 Ok(_) => (true, "Streaming started".to_string()),
                                 Err(e) => (false, format!("OBS Error: {}", e)),
                             }
                         }
 
                         "stop_stream" | "obs_stop_stream" => {
-                            match client.send_obs_request("StopStream", serde_json::json!({})).await {
+                            match client
+                                .send_obs_request("StopStream", serde_json::json!({}))
+                                .await
+                            {
                                 Ok(_) => (true, "Streaming stopped".to_string()),
                                 Err(e) => (false, format!("OBS Error: {}", e)),
                             }
                         }
 
                         "toggle_virtual_cam" | "obs_toggle_virtual_cam" => {
-                            match client.send_obs_request("ToggleVirtualCam", serde_json::json!({})).await {
+                            match client
+                                .send_obs_request("ToggleVirtualCam", serde_json::json!({}))
+                                .await
+                            {
                                 Ok(_) => (true, "Virtual Camera toggled".to_string()),
                                 Err(e) => (false, format!("OBS Error: {}", e)),
                             }
                         }
 
                         "start_virtual_cam" => {
-                            match client.send_obs_request("StartVirtualCam", serde_json::json!({})).await {
+                            match client
+                                .send_obs_request("StartVirtualCam", serde_json::json!({}))
+                                .await
+                            {
                                 Ok(_) => (true, "Virtual Camera started".to_string()),
                                 Err(e) => (false, format!("OBS Error: {}", e)),
                             }
                         }
 
                         "stop_virtual_cam" => {
-                            match client.send_obs_request("StopVirtualCam", serde_json::json!({})).await {
+                            match client
+                                .send_obs_request("StopVirtualCam", serde_json::json!({}))
+                                .await
+                            {
                                 Ok(_) => (true, "Virtual Camera stopped".to_string()),
                                 Err(e) => (false, format!("OBS Error: {}", e)),
                             }
                         }
 
                         "save_replay_buffer" | "obs_replay_buffer" => {
-                            match client.send_obs_request("SaveReplayBuffer", serde_json::json!({})).await {
+                            match client
+                                .send_obs_request("SaveReplayBuffer", serde_json::json!({}))
+                                .await
+                            {
                                 Ok(_) => (true, "Replay buffer saved".to_string()),
                                 Err(e) => (false, format!("OBS Error: {}", e)),
                             }
                         }
 
                         "toggle_replay_buffer" | "obs_toggle_replay_buffer" => {
-                            match client.send_obs_request("ToggleReplayBuffer", serde_json::json!({})).await {
+                            match client
+                                .send_obs_request("ToggleReplayBuffer", serde_json::json!({}))
+                                .await
+                            {
                                 Ok(_) => (true, "Replay buffer toggled".to_string()),
                                 Err(e) => (false, format!("OBS Error: {}", e)),
                             }
                         }
 
                         "start_replay_buffer" => {
-                            match client.send_obs_request("StartReplayBuffer", serde_json::json!({})).await {
+                            match client
+                                .send_obs_request("StartReplayBuffer", serde_json::json!({}))
+                                .await
+                            {
                                 Ok(_) => (true, "Replay buffer started".to_string()),
                                 Err(e) => (false, format!("OBS Error: {}", e)),
                             }
                         }
 
                         "stop_replay_buffer" => {
-                            match client.send_obs_request("StopReplayBuffer", serde_json::json!({})).await {
+                            match client
+                                .send_obs_request("StopReplayBuffer", serde_json::json!({}))
+                                .await
+                            {
                                 Ok(_) => (true, "Replay buffer stopped".to_string()),
                                 Err(e) => (false, format!("OBS Error: {}", e)),
                             }
                         }
 
                         "toggle_studio_mode" | "obs_toggle_studio_mode" => {
-                            match client.send_obs_request("GetStudioModeEnabled", serde_json::json!({})).await {
+                            match client
+                                .send_obs_request("GetStudioModeEnabled", serde_json::json!({}))
+                                .await
+                            {
                                 Ok(resp) => {
-                                    let enabled = resp.get("responseData").and_then(|v| v.get("studioModeEnabled")).and_then(|v| v.as_bool()).unwrap_or(false);
-                                    let _ = client.send_obs_request("SetStudioModeEnabled", serde_json::json!({ "studioModeEnabled": !enabled })).await;
-                                    (true, format!("Studio mode {}", if !enabled { "enabled" } else { "disabled" }))
+                                    match resp.get("responseData").and_then(|v| v.get("studioModeEnabled")).and_then(|v| v.as_bool()) {
+                                        Some(enabled) => {
+                                            match client.send_obs_request("SetStudioModeEnabled", serde_json::json!({ "studioModeEnabled": !enabled })).await {
+                                                Ok(_) => (true, format!("Studio mode {}", if !enabled { "enabled" } else { "disabled" })),
+                                                Err(error) => (false, format!("OBS Error: {error}")),
+                                            }
+                                        }
+                                        None => (false, "OBS did not return the Studio Mode state".to_string()),
+                                    }
                                 }
                                 Err(e) => (false, format!("OBS Error: {}", e)),
                             }
                         }
 
                         "trigger_studio_transition" | "obs_trigger_studio_transition" => {
-                            match client.send_obs_request("TriggerStudioModeTransition", serde_json::json!({})).await {
+                            match client
+                                .send_obs_request(
+                                    "TriggerStudioModeTransition",
+                                    serde_json::json!({}),
+                                )
+                                .await
+                            {
                                 Ok(_) => (true, "Studio transition triggered".to_string()),
                                 Err(e) => (false, format!("OBS Error: {}", e)),
                             }
                         }
 
                         "take_screenshot" | "obs_take_screenshot" => {
-                            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
-                            let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
-                            let path = format!("{}\\Pictures\\obs_screenshot_{}.png", home, now);
-                            let source = args.get("sourceName")
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs();
+                            let source = args
+                                .get("sourceName")
                                 .or_else(|| args.get("sceneName"))
                                 .and_then(|v| v.as_str())
                                 .map(|s| s.to_string())
                                 .unwrap_or_else(|| client.current_scene.lock().unwrap().clone());
 
-                            match client.send_obs_request("SaveSourceScreenshot", serde_json::json!({
-                                "sourceName": source,
-                                "imageFormat": "png",
-                                "imageFilePath": path
-                            })).await {
-                                Ok(_) => (true, "Screenshot saved to Pictures".to_string()),
-                                Err(e) => (false, format!("OBS Error: {}", e)),
+                            match screenshot_path(now) {
+                                Ok(path) => {
+                                    let path_string = path.to_string_lossy().into_owned();
+                                    match client
+                                        .send_obs_request(
+                                            "SaveSourceScreenshot",
+                                            serde_json::json!({
+                                                "sourceName": source,
+                                                "imageFormat": "png",
+                                                "imageFilePath": path_string
+                                            }),
+                                        )
+                                        .await
+                                    {
+                                        Ok(_) => (
+                                            true,
+                                            format!("Screenshot saved to {}", path.display()),
+                                        ),
+                                        Err(e) => (false, format!("OBS Error: {}", e)),
+                                    }
+                                }
+                                Err(error) => (false, error),
                             }
                         }
 
                         "set_input_volume" | "obs_set_input_volume" => {
-                            let input = args.get("inputName")
+                            let input = args
+                                .get("inputName")
                                 .or_else(|| args.get("input"))
                                 .or_else(|| args.get("source"))
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("");
-                            let vol_pct = args.get("volumePercent")
-                                .and_then(|v| v.as_f64().or_else(|| v.as_str()?.parse().ok()))
-                                .unwrap_or(100.0) / 100.0;
                             if input.is_empty() {
                                 (false, "No audio input specified".to_string())
                             } else {
-                                match client.send_obs_request("SetInputVolume", serde_json::json!({
-                                    "inputName": input,
-                                    "inputVolumeMul": vol_pct
-                                })).await {
-                                    Ok(_) => (true, format!("Volume set to {:.0}% for {}", vol_pct * 100.0, input)),
-                                    Err(e) => (false, format!("OBS Error: {}", e)),
+                                match parse_volume_percent(args.get("volumePercent")) {
+                                    Ok(volume_percent) => {
+                                        match client
+                                            .send_obs_request(
+                                                "SetInputVolume",
+                                                serde_json::json!({
+                                                    "inputName": input,
+                                                    "inputVolumeMul": volume_percent / 100.0
+                                                }),
+                                            )
+                                            .await
+                                        {
+                                            Ok(_) => (
+                                                true,
+                                                format!(
+                                                    "Volume set to {:.0}% for {}",
+                                                    volume_percent, input
+                                                ),
+                                            ),
+                                            Err(e) => (false, format!("OBS Error: {}", e)),
+                                        }
+                                    }
+                                    Err(error) => (false, error),
                                 }
                             }
                         }
 
                         "toggle_source_visibility" | "obs_toggle_source_visibility" => {
-                            let scene_name = args.get("sceneName")
+                            let scene_name = args
+                                .get("sceneName")
                                 .and_then(|v| v.as_str())
                                 .map(|s| s.to_string())
                                 .unwrap_or_else(|| client.current_scene.lock().unwrap().clone());
-                            let source_name = args.get("sourceName")
+                            let source_name = args
+                                .get("sourceName")
                                 .or_else(|| args.get("inputName"))
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("");
@@ -960,31 +1315,73 @@ async fn main() {
                                 (false, "Scene and source name are required".to_string())
                             } else {
                                 // 1. Get Scene Item ID
-                                match client.send_obs_request("GetSceneItemId", serde_json::json!({
-                                    "sceneName": scene_name,
-                                    "sourceName": source_name
-                                })).await {
+                                match client
+                                    .send_obs_request(
+                                        "GetSceneItemId",
+                                        serde_json::json!({
+                                            "sceneName": scene_name,
+                                            "sourceName": source_name
+                                        }),
+                                    )
+                                    .await
+                                {
                                     Ok(id_resp) => {
-                                        if let Some(item_id) = id_resp.get("responseData").and_then(|v| v.get("sceneItemId")).and_then(|v| v.as_i64()) {
+                                        if let Some(item_id) = id_resp
+                                            .get("responseData")
+                                            .and_then(|v| v.get("sceneItemId"))
+                                            .and_then(|v| v.as_i64())
+                                        {
                                             // 2. Get Scene Item Enabled Status
-                                            match client.send_obs_request("GetSceneItemEnabled", serde_json::json!({
-                                                "sceneName": scene_name,
-                                                "sceneItemId": item_id
-                                            })).await {
-                                                Ok(en_resp) => {
-                                                    let enabled = en_resp.get("responseData").and_then(|v| v.get("sceneItemEnabled")).and_then(|v| v.as_bool()).unwrap_or(false);
-                                                    // 3. Toggle Enabled Status
-                                                    let _ = client.send_obs_request("SetSceneItemEnabled", serde_json::json!({
+                                            match client
+                                                .send_obs_request(
+                                                    "GetSceneItemEnabled",
+                                                    serde_json::json!({
                                                         "sceneName": scene_name,
-                                                        "sceneItemId": item_id,
-                                                        "sceneItemEnabled": !enabled
-                                                    })).await;
-                                                    (true, format!("Visibility toggled for: {}", source_name))
+                                                        "sceneItemId": item_id
+                                                    }),
+                                                )
+                                                .await
+                                            {
+                                                Ok(en_resp) => {
+                                                    let enabled = en_resp
+                                                        .get("responseData")
+                                                        .and_then(|v| v.get("sceneItemEnabled"))
+                                                        .and_then(|v| v.as_bool())
+                                                        .unwrap_or(false);
+                                                    // 3. Toggle Enabled Status
+                                                    match client
+                                                        .send_obs_request(
+                                                            "SetSceneItemEnabled",
+                                                            serde_json::json!({
+                                                                "sceneName": scene_name,
+                                                                "sceneItemId": item_id,
+                                                                "sceneItemEnabled": !enabled
+                                                            }),
+                                                        )
+                                                        .await
+                                                    {
+                                                        Ok(_) => (
+                                                            true,
+                                                            format!(
+                                                                "Visibility toggled for: {}",
+                                                                source_name
+                                                            ),
+                                                        ),
+                                                        Err(error) => {
+                                                            (false, format!("OBS Error: {error}"))
+                                                        }
+                                                    }
                                                 }
                                                 Err(e) => (false, format!("OBS Error: {}", e)),
                                             }
                                         } else {
-                                            (false, format!("Source '{}' not found in scene '{}'", source_name, scene_name))
+                                            (
+                                                false,
+                                                format!(
+                                                    "Source '{}' not found in scene '{}'",
+                                                    source_name, scene_name
+                                                ),
+                                            )
                                         }
                                     }
                                     Err(e) => (false, format!("OBS Error: {}", e)),
@@ -993,33 +1390,63 @@ async fn main() {
                         }
 
                         "set_source_visibility" => {
-                            let scene_name = args.get("sceneName")
+                            let scene_name = args
+                                .get("sceneName")
                                 .and_then(|v| v.as_str())
                                 .map(|s| s.to_string())
                                 .unwrap_or_else(|| client.current_scene.lock().unwrap().clone());
-                            let source_name = args.get("sourceName")
+                            let source_name = args
+                                .get("sourceName")
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("");
-                            let visible_str = args.get("visibility").and_then(|v| v.as_str()).unwrap_or("show");
-                            let should_show = visible_str == "show" || visible_str == "true" || args.get("visibility").and_then(|v| v.as_bool()).unwrap_or(true);
+                            let should_show = parse_visibility(args.get("visibility"));
 
                             if scene_name.is_empty() || source_name.is_empty() {
                                 (false, "Scene and source name are required".to_string())
                             } else {
-                                match client.send_obs_request("GetSceneItemId", serde_json::json!({
-                                    "sceneName": scene_name,
-                                    "sourceName": source_name
-                                })).await {
+                                match client
+                                    .send_obs_request(
+                                        "GetSceneItemId",
+                                        serde_json::json!({
+                                            "sceneName": scene_name,
+                                            "sourceName": source_name
+                                        }),
+                                    )
+                                    .await
+                                {
                                     Ok(id_resp) => {
-                                        if let Some(item_id) = id_resp.get("responseData").and_then(|v| v.get("sceneItemId")).and_then(|v| v.as_i64()) {
-                                            let _ = client.send_obs_request("SetSceneItemEnabled", serde_json::json!({
-                                                "sceneName": scene_name,
-                                                "sceneItemId": item_id,
-                                                "sceneItemEnabled": should_show
-                                            })).await;
-                                            (true, format!("Visibility set for: {}", source_name))
+                                        if let Some(item_id) = id_resp
+                                            .get("responseData")
+                                            .and_then(|v| v.get("sceneItemId"))
+                                            .and_then(|v| v.as_i64())
+                                        {
+                                            match client
+                                                .send_obs_request(
+                                                    "SetSceneItemEnabled",
+                                                    serde_json::json!({
+                                                        "sceneName": scene_name,
+                                                        "sceneItemId": item_id,
+                                                        "sceneItemEnabled": should_show
+                                                    }),
+                                                )
+                                                .await
+                                            {
+                                                Ok(_) => (
+                                                    true,
+                                                    format!("Visibility set for: {}", source_name),
+                                                ),
+                                                Err(error) => {
+                                                    (false, format!("OBS Error: {error}"))
+                                                }
+                                            }
                                         } else {
-                                            (false, format!("Source '{}' not found in scene '{}'", source_name, scene_name))
+                                            (
+                                                false,
+                                                format!(
+                                                    "Source '{}' not found in scene '{}'",
+                                                    source_name, scene_name
+                                                ),
+                                            )
                                         }
                                     }
                                     Err(e) => (false, format!("OBS Error: {}", e)),

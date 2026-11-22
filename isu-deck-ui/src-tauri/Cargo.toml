@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.2.0"
+version = "1.2.1"
 description = "IsuDeck by rootcf - Open-Source Macro Keypad & Automation Studio"
 authors = ["rootcf"]
 license = "GPL-3.0-only"
@@ -54,7 +54,9 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_Registry",
     "Win32_Media_Multimedia",
     "Win32_Media_Audio",
-    "Win32_System_Com"
+    "Win32_System_Com",
+    "Win32_System_SystemInformation",
+    "Win32_System_Power"
 ] }
 
 # --- Linux Özel Bağımlılıklar ---

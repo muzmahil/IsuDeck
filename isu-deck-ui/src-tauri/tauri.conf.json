@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "IsuDeck",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "identifier": "IsuDeck",
   "build": {
     "frontendDist": "../dist",
@@ -19,6 +19,7 @@
         "fullscreen": false,
         "decorations": false,
         "center": true,
+        "dragDropEnabled": false,
         "backgroundColor": "#121212",
         "theme": "Dark"
       }

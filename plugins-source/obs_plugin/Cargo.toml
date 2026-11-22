@@ -2,11 +2,16 @@
 name = "obs_plugin"
 version = "1.0.0"
 edition = "2021"
+description = "OBS Studio integration plugin for IsuDeck using obs-websocket v5"
+license = "GPL-3.0-only"
+readme = "README.md"
+repository = "https://github.com/muzmahil/IsuDeck.OBSPlugin"
+keywords = ["obs", "isudeck", "websocket", "streaming"]
+categories = ["multimedia"]
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.24", features = ["connect"] }
-tungstenite = "0.24"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"

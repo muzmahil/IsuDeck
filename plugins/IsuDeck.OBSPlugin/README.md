@@ -41,5 +41,9 @@ The official OBS Studio integration for IsuDeck, powered by high-performance Web
 1. In OBS Studio, navigate to **Tools > WebSocket Server Settings** (Araçlar > WebSocket Sunucusu Ayarları).
 2. Ensure **Enable WebSocket server** (WebSocket sunucusunu etkinleştir) is checked.
 3. Note the **Server Port** (default `4455`).
-4. If authentication is enabled, copy or set your server password.
+4. Keep authentication enabled and set a strong server password.
 5. In IsuDeck, open **Plugins**, click **Configure** on the **OBS Studio** plugin, verify the Host and Port, enter your password if configured, and click **Save**.
+
+Keep the server bound to localhost unless remote access is specifically needed. Do not expose the OBS WebSocket server directly to the public internet. IsuDeck stores plugin configuration locally; do not share configuration files containing credentials.
+
+The source code, build instructions, and contribution guidance are in [`plugins-source/obs_plugin`](../../plugins-source/obs_plugin/README.md). This plugin is licensed under GPL-3.0-only; see the repository [`LICENSE`](../../LICENSE).

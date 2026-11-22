@@ -25,7 +25,7 @@ export async function getAppVersion() {
   try {
     return await invoke('get_app_version');
   } catch {
-    return '1.2.0';
+    return '1.2.1';
   }
 }
 

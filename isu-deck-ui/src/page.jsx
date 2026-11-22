@@ -4,6 +4,7 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import ActionEditor from './components/ActionEditor';
 import useStore, { claimHoldBinding, getHoldBindingKey, releaseHoldBinding } from './store/useStore';
 import DeckGrid from './components/DeckGrid';
+import { findButtonIndexByBinding } from './utils/bindingMatch';
 
 export default function Home() {
   const { 
@@ -107,29 +108,8 @@ export default function Home() {
 
     const currentButtons = buttonsRef.current;
 
-    const findButtonIndex = (message) => {
-      const matches = currentButtons.map((btn, index) => {
-        if (!btn || !btn.binding) return null;
-
-        const btnKey = String(btn.binding.key);
-        const msgKey = String(message.key);
-        if (btnKey !== msgKey) return null;
-
-        let isHidMatch = true;
-        if (btn.binding.hid && message.hid) {
-          const bHid = String(btn.binding.hid);
-          const mHid = String(message.hid);
-          isHidMatch = (bHid === mHid) ||
-            (bHid.includes(mHid) || mHid.includes(bHid)) ||
-            (bHid === 'any' || mHid === 'any');
-        }
-
-        return isHidMatch ? index : null;
-      });
-
-      const match = matches.find(idx => idx !== null);
-      return match === undefined ? null : match;
-    };
+    const findButtonIndex = (message) =>
+      findButtonIndexByBinding(currentButtons, message);
 
     const claimMessage = () => {
       const msgId = lastMessage._msgId;
@@ -163,8 +143,6 @@ export default function Home() {
         return;
       }
 
-      console.log(`[MATCH] Button ${btnIndex} triggered.`);
-
       // A) Visual feedback
       setPressedButtonIndex(btnIndex);
       setTimeout(() => setPressedButtonIndex(null), 150);
@@ -185,7 +163,6 @@ export default function Home() {
           },
           timestamp: Date.now()
         };
-        console.log("[PAGE] Sending action:", payload);
         sendToEngine(payload);
       }
       return;
@@ -236,7 +213,6 @@ export default function Home() {
       .map(btn => ({ hid: btn.binding.hid, key: btn.binding.key }));
     
     sendToEngine({ type: "init_block_list", blocks });
-    console.log("📤 Grid boyutu değişti, blok listesi güncellendi.");
   };
 
   const triggerButton = (index) => {
@@ -265,7 +241,6 @@ export default function Home() {
         timestamp: Date.now()
       };
       
-      console.log("[PAGE] Sending action:", payload);
       sendToEngine(payload);
     }
   };
@@ -395,7 +370,7 @@ export default function Home() {
       )}
 
       {/* Arka Plan Ortam Işığı (Ambient Glow) */}
-      {settings?.deckBacklight !== false && (
+      {settings?.deckBacklight !== false && !isEditorOpen && (
         <div 
           className="absolute w-[500px] md:w-[750px] h-[350px] md:h-[450px] rounded-full blur-[140px] md:blur-[180px] opacity-25 pointer-events-none transition-all duration-700 z-0"
           style={{ backgroundColor: accentColor }}

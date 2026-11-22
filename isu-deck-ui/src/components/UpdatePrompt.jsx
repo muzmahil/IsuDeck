@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import useStore from '../store/useStore';
 import { openExternalUrl } from '../utils/updater';
+import { renderMarkdown } from '../utils/markdown';
 
 const REMINDER_DELAY_MS = 24 * 60 * 60 * 1000;
 
@@ -14,6 +15,11 @@ export default function UpdatePrompt() {
   } = useStore();
   const [actionError, setActionError] = useState('');
   const isTurkish = language === 'tr';
+
+  const releaseNotesHtml = useMemo(
+    () => (updateInfo?.releaseNotes ? renderMarkdown(updateInfo.releaseNotes) : ''),
+    [updateInfo?.releaseNotes]
+  );
 
   if (!updatePromptOpen || !updateInfo?.updateAvailable) return null;
 
@@ -71,14 +77,24 @@ export default function UpdatePrompt() {
         </header>
 
         <div className="space-y-4 overflow-y-auto p-5">
-          {updateInfo.releaseNotes && (
+          {releaseNotesHtml && (
             <div>
               <h3 className="mb-2 text-xs font-bold text-white">
                 {isTurkish ? 'Sürüm notları' : 'Release notes'}
               </h3>
-              <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap rounded-xl border border-white/5 bg-[#121212] p-3.5 font-mono text-[11px] leading-relaxed text-zinc-300">
-                {updateInfo.releaseNotes}
-              </pre>
+              <div
+                role="document"
+                className="release-notes plugin-readme max-h-64 overflow-y-auto rounded-xl border border-white/5 bg-[#121212] p-3.5"
+                onClick={(event) => {
+                  const anchor = event.target.closest?.('a[href]');
+                  if (!anchor) return;
+                  // Open release links in the user's browser instead of
+                  // navigating the Tauri webview away from the app.
+                  event.preventDefault();
+                  openExternalUrl(anchor.getAttribute('href'));
+                }}
+                dangerouslySetInnerHTML={{ __html: releaseNotesHtml }}
+              />
             </div>
           )}
 

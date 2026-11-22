@@ -221,7 +221,6 @@ dependencies = [
  "sha2",
  "tokio",
  "tokio-tungstenite",
- "tungstenite",
 ]
 
 [[package]]

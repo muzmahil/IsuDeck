@@ -5,46 +5,7 @@ import useStore from '../../store/useStore';
 import { fileSystem } from '../../utils/fileSystem';
 import { fetchRegistry, installPluginFromFile, installPluginFromUrl, isRegistryCacheFresh, readCachedRegistry, uninstallPlugin } from '../../utils/pluginStore';
 import { compareVersions, getAppVersion } from '../../utils/updater';
-import { marked } from 'marked';
-
-// HTML Temizleme Fonksiyonu (Güvenlik için)
-const sanitizeHtml = (html) => {
-  if (!html) return '';
-  if (typeof window === 'undefined') return '';
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  const allowedTags = ['P', 'I', 'SPAN', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'B', 'STRONG', 'EM', 'U', 'BR', 'DIV', 'HR', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'CODE', 'PRE', 'A', 'IMG', 'TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR', 'TH', 'TD', 'DEL', 'S'];
-  
-  const clean = (node) => {
-    const children = Array.from(node.childNodes);
-    for (const child of children) {
-      if (child.nodeType === 1) { // Element
-        const tagName = child.tagName;
-        if (!allowedTags.includes(tagName)) {
-          if (['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META', 'SVG', 'AUDIO', 'VIDEO', 'CANVAS', 'FORM', 'INPUT', 'BUTTON', 'TEXTAREA', 'SELECT', 'OPTION', 'HEAD', 'BODY', 'HTML'].includes(tagName)) {
-            child.remove();
-          } else {
-            clean(child);
-            while (child.firstChild) {
-              node.insertBefore(child.firstChild, child);
-            }
-            child.remove();
-          }
-        } else {
-          const attrs = Array.from(child.attributes);
-          for (const attr of attrs) {
-            const name = attr.name.toLowerCase();
-            if (!['class', 'src', 'alt', 'href', 'target', 'title'].includes(name)) {
-              child.removeAttribute(attr.name);
-            }
-          }
-          clean(child);
-        }
-      }
-    }
-  };
-  clean(doc.body);
-  return doc.body.innerHTML;
-};
+import { renderMarkdown, sanitizeHtml } from '../../utils/markdown';
 
 const isNewerVersion = (candidate, current) => {
   const toParts = (version) => String(version || '').split('-')[0].split('.').map(part => Number.parseInt(part, 10) || 0);
@@ -538,6 +499,254 @@ export default function PluginsView() {
   });
 
   // Detay Görünümü
+  // Modals are shared by the list and detail views. Rendering them only in the
+  // list return meant Configure/Install/Uninstall dialogs opened behind the
+  // detail page and only became visible after going back.
+  const overlays = (
+    <>
+      {/* Configuration Modal */}
+      {configModal.show && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-[#1e1e1e] border border-white/10 rounded-2xl shadow-2xl max-w-2xl w-full flex flex-col max-h-[80vh] animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+                {/* Header */}
+                <div className="h-16 border-b border-white/5 flex items-center justify-between px-6 bg-[#252525] rounded-t-2xl">
+                    <h2 className="text-lg font-bold text-white flex items-center gap-3">
+                        <svg className="w-5 h-5 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                        {configModal.plugin?.name} {t('plugins_page.settings_title', language)}
+                    </h2>
+                    <button onClick={() => setConfigModal({ show: false, plugin: null, values: {} })} className="text-zinc-400 hover:text-white transition-colors cursor-pointer">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18"/><path d="M6 6 18 18"/></svg>
+                    </button>
+                </div>
+
+                {/* Body */}
+                <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                    {configModal.plugin?.config?.length > 0 ? (
+                        configModal.plugin.config.map((cfg, idx) => {
+                            const field = cfg.fields?.[0] || cfg;
+                            const fieldType = field.type || 'text';
+                            const fieldKey = cfg.key || field.key || `cfg_${idx}`;
+                            const label = field.label || field.name || fieldKey;
+                            const placeholder = field.placeholder || '';
+                            const isRequired = !!field.required;
+                            const val = configModal.values[fieldKey] !== undefined ? configModal.values[fieldKey] : (cfg.value ?? '');
+
+                            return (
+                            <div key={fieldKey} className="space-y-2">
+                                {fieldType !== 'checkbox' && (
+                                    <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider block">
+                                        {t(label, language)} {isRequired && <span className="text-red-500">*</span>}
+                                    </label>
+                                )}
+                                
+                                {(fieldType === 'text' || fieldType === 'password') && (
+                                    <input 
+                                        type={fieldType} 
+                                        value={val}
+                                        onChange={(e) => updateConfigValue(fieldKey, e.target.value)}
+                                        placeholder={t(placeholder, language)}
+                                        className="w-full bg-[#121212] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all text-sm"
+                                    />
+                                )}
+                                {fieldType === 'number' && (
+                                    <input 
+                                        type="number" 
+                                        value={val}
+                                        onChange={(e) => updateConfigValue(fieldKey, e.target.value)}
+                                        placeholder={t(placeholder, language)}
+                                        className="w-full bg-[#121212] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all text-sm"
+                                    />
+                                )}
+                                {fieldType === 'checkbox' && (
+                                    <label className="flex items-center gap-3 p-3 bg-[#121212] border border-white/10 rounded-xl cursor-pointer hover:bg-white/5 transition-colors">
+                                        <input 
+                                            type="checkbox" 
+                                            checked={!!val}
+                                            onChange={(e) => updateConfigValue(fieldKey, e.target.checked)}
+                                            className="w-5 h-5 rounded border-zinc-600 text-blue-600 focus:ring-blue-500 bg-zinc-700"
+                                        />
+                                        <span className="text-sm font-medium text-white">{t(label, language)}</span>
+                                    </label>
+                                )}
+                                {fieldType === 'select' && (
+                                    <select
+                                        value={val}
+                                        onChange={(e) => updateConfigValue(fieldKey, e.target.value)}
+                                        className="w-full bg-[#121212] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500/50 transition-all text-sm"
+                                    >
+                                        {(field.options || []).map(opt => (
+                                            <option key={opt.id || opt.value || opt} value={opt.id || opt.value || opt}>
+                                                {opt.label || opt.name || opt}
+                                            </option>
+                                        ))}
+                                    </select>
+                                )}
+                                {fieldType === 'richtext' && (
+                                    <div className="space-y-2">
+                                        <textarea
+                                            value={val}
+                                            onChange={(e) => updateConfigValue(fieldKey, e.target.value)}
+                                            placeholder={t(placeholder, language)}
+                                            className="w-full bg-[#121212] border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500 outline-none transition-colors min-h-[100px] resize-y"
+                                        />
+                                        <div className="bg-[#1a1a1a] border border-white/5 rounded-xl p-3">
+                                            <div className="text-[10px] text-zinc-500 mb-2 uppercase tracking-wider font-bold">{t('plugins_page.preview', language)}</div>
+                                            <div 
+                                                className="prose prose-invert prose-sm max-w-none text-zinc-300 [&>h1]:text-white [&>h1]:text-lg [&>h1]:font-bold [&>h2]:text-white [&>h2]:text-base [&>h2]:font-bold [&>p]:my-1"
+                                                dangerouslySetInnerHTML={{ __html: sanitizeHtml(val, { rich: false }) }}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                            );
+                        })
+                    ) : (
+                        <div className="text-center text-zinc-500 py-10">{t('plugins_page.no_config', language)}</div>
+                    )}
+                </div>
+
+                {/* Footer */}
+                <div className="h-20 border-t border-white/5 bg-[#252525] rounded-b-2xl flex items-center justify-end px-6 gap-3">
+                    <button onClick={() => setConfigModal({ show: false, plugin: null, values: {} })} className="px-5 py-2.5 rounded-xl text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer">{t('plugins_page.cancel', language)}</button>
+                    <button onClick={handleSaveConfig} className="px-6 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg transition-all cursor-pointer" style={{ backgroundColor: accentColor }}>{t('plugins_page.save', language)}</button>
+                </div>
+            </div>
+        </div>
+      )}
+      {/* Installation Modal */}
+      {installModal.show && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-[#1e1e1e] border border-white/10 rounded-2xl shadow-2xl max-w-lg w-full flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="h-16 border-b border-white/5 flex items-center justify-between px-6 bg-[#252525] rounded-t-2xl">
+              <h2 className="text-lg font-bold text-white">
+                {installModal.mode === 'url'
+                  ? (language === 'tr' ? 'URL’den ZIP Kur' : 'Install ZIP from URL')
+                  : (language === 'tr' ? 'Dosyadan ZIP Kur' : 'Install ZIP from File')}
+              </h2>
+              <button
+                onClick={() => setInstallModal({ show: false, mode: 'file', filePath: '', url: '', sha256: '', dirName: '', error: '' })}
+                className="text-zinc-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18"/><path d="M6 6 18 18"/></svg>
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {installModal.mode === 'url' ? (
+                <>
+                  <label className="block space-y-1.5">
+                    <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">ZIP URL</span>
+                    <input
+                      type="url"
+                      value={installModal.url}
+                      onChange={(event) => setInstallModal(prev => ({ ...prev, url: event.target.value, error: '' }))}
+                      placeholder="https://example.com/plugin.zip"
+                      className="w-full bg-[#121212] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500/50 text-sm"
+                    />
+                  </label>
+                  <label className="block space-y-1.5">
+                    <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">SHA-256</span>
+                    <input
+                      type="text"
+                      value={installModal.sha256}
+                      onChange={(event) => setInstallModal(prev => ({ ...prev, sha256: event.target.value, error: '' }))}
+                      placeholder="64 hexadecimal characters"
+                      className="w-full bg-[#121212] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500/50 text-sm font-mono"
+                    />
+                  </label>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">ZIP File</span>
+                    <p className="text-sm text-zinc-300 bg-[#121212] border border-white/10 rounded-xl px-4 py-3 break-all">{installModal.filePath}</p>
+                  </div>
+                  <label className="block space-y-1.5">
+                    <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">SHA-256 (optional)</span>
+                    <input
+                      type="text"
+                      value={installModal.sha256}
+                      onChange={(event) => setInstallModal(prev => ({ ...prev, sha256: event.target.value, error: '' }))}
+                      placeholder="64 hexadecimal characters"
+                      className="w-full bg-[#121212] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500/50 text-sm font-mono"
+                    />
+                  </label>
+                  {!installModal.sha256.trim() && (
+                    <p className="text-xs text-amber-400 leading-relaxed">
+                      {language === 'tr'
+                        ? 'SHA-256 boş. Dosya kaynağı doğrulanamaz; kurulum doğrulanmamış sayılır.'
+                        : 'No SHA-256. The file source cannot be verified; this install is considered unverified.'}
+                    </p>
+                  )}
+                </>
+              )}
+
+              <label className="block space-y-1.5">
+                <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">{language === 'tr' ? 'Klasör adı (isteğe bağlı)' : 'Folder name (optional)'}</span>
+                <input
+                  type="text"
+                  value={installModal.dirName}
+                  onChange={(event) => setInstallModal(prev => ({ ...prev, dirName: event.target.value, error: '' }))}
+                  placeholder={language === 'tr' ? 'Boş bırakılırsa plugin kimliği kullanılır' : 'Leave empty to use the plugin identifier'}
+                  className="w-full bg-[#121212] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500/50 text-sm"
+                />
+              </label>
+
+              {installModal.error && <p className="text-xs text-red-400 break-words leading-relaxed">{installModal.error}</p>}
+            </div>
+
+            <div className="h-20 border-t border-white/5 bg-[#252525] rounded-b-2xl flex items-center justify-end px-6 gap-3">
+              <button
+                onClick={() => setInstallModal({ show: false, mode: 'file', filePath: '', url: '', sha256: '', dirName: '', error: '' })}
+                className="px-5 py-2.5 rounded-xl text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+              >
+                {t('plugins_page.cancel', language)}
+              </button>
+              <button
+                disabled={storeBusy}
+                onClick={submitInstall}
+                className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg transition-all cursor-pointer disabled:opacity-50"
+                style={{ backgroundColor: accentColor }}
+              >
+                {storeBusy ? (
+                  <>
+                    <Spinner className="w-4 h-4" />
+                    {language === 'tr' ? 'Kuruluyor…' : 'Installing…'}
+                  </>
+                ) : (language === 'tr' ? 'Kur' : 'Install')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal */}
+      {confirmModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-[#1e1e1e] border border-white/10 rounded-2xl shadow-2xl max-w-md w-full animate-in zoom-in-95 duration-200">
+            <div className="p-6 space-y-3">
+              <h2 className="text-lg font-bold text-white">{confirmModal.title}</h2>
+              <p className="text-sm text-zinc-400 leading-relaxed">{confirmModal.message}</p>
+            </div>
+            <div className="h-20 border-t border-white/5 bg-[#252525] rounded-b-2xl flex items-center justify-end px-6 gap-3">
+              <button onClick={() => setConfirmModal(null)} className="px-5 py-2.5 rounded-xl text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer">
+                {t('plugins_page.cancel', language)}
+              </button>
+              <button
+                onClick={confirmModal.onConfirm}
+                className="px-6 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg transition-all cursor-pointer"
+                style={{ backgroundColor: confirmModal.destructive ? '#dc2626' : accentColor }}
+              >
+                {confirmModal.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
   if (selectedPlugin) {
     const detailBusy = isPluginBusy(selectedPlugin);
     const platformMismatch = Boolean(
@@ -546,7 +755,7 @@ export default function PluginsView() {
     const canInstallFromStore = Boolean(selectedPlugin.registryEntry) &&
       (!selectedPlugin.installed || selectedPlugin.updateAvailable);
     const readmeHtml = selectedPlugin.readme
-      ? sanitizeHtml(marked.parse(selectedPlugin.readme.replace(/\\#/g, '#').replace(/\\\*/g, '*')))
+      ? renderMarkdown(selectedPlugin.readme.replace(/\\#/g, '#').replace(/\\\*/g, '*'))
       : '';
     const metaRows = [
       { label: t('plugins_page.version', language), value: selectedPlugin.version || '—' },
@@ -827,6 +1036,7 @@ export default function PluginsView() {
             </div>
           </div>
         </div>
+      {overlays}
       </div>
     );
   }
@@ -1026,246 +1236,7 @@ export default function PluginsView() {
         )}
       </div>
 
-      {/* Configuration Modal */}
-      {configModal.show && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={(e) => e.stopPropagation()}>
-            <div className="bg-[#1e1e1e] border border-white/10 rounded-2xl shadow-2xl max-w-2xl w-full flex flex-col max-h-[80vh] animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
-                {/* Header */}
-                <div className="h-16 border-b border-white/5 flex items-center justify-between px-6 bg-[#252525] rounded-t-2xl">
-                    <h2 className="text-lg font-bold text-white flex items-center gap-3">
-                        <svg className="w-5 h-5 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-                        {configModal.plugin?.name} {t('plugins_page.settings_title', language)}
-                    </h2>
-                    <button onClick={() => setConfigModal({ show: false, plugin: null, values: {} })} className="text-zinc-400 hover:text-white transition-colors cursor-pointer">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18"/><path d="M6 6 18 18"/></svg>
-                    </button>
-                </div>
-
-                {/* Body */}
-                <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                    {configModal.plugin?.config?.length > 0 ? (
-                        configModal.plugin.config.map((cfg, idx) => {
-                            const field = cfg.fields?.[0] || cfg;
-                            const fieldType = field.type || 'text';
-                            const fieldKey = cfg.key || field.key || `cfg_${idx}`;
-                            const label = field.label || field.name || fieldKey;
-                            const placeholder = field.placeholder || '';
-                            const isRequired = !!field.required;
-                            const val = configModal.values[fieldKey] !== undefined ? configModal.values[fieldKey] : (cfg.value ?? '');
-
-                            return (
-                            <div key={fieldKey} className="space-y-2">
-                                {fieldType !== 'checkbox' && (
-                                    <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider block">
-                                        {t(label, language)} {isRequired && <span className="text-red-500">*</span>}
-                                    </label>
-                                )}
-                                
-                                {(fieldType === 'text' || fieldType === 'password') && (
-                                    <input 
-                                        type={fieldType} 
-                                        value={val}
-                                        onChange={(e) => updateConfigValue(fieldKey, e.target.value)}
-                                        placeholder={t(placeholder, language)}
-                                        className="w-full bg-[#121212] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all text-sm"
-                                    />
-                                )}
-                                {fieldType === 'number' && (
-                                    <input 
-                                        type="number" 
-                                        value={val}
-                                        onChange={(e) => updateConfigValue(fieldKey, e.target.value)}
-                                        placeholder={t(placeholder, language)}
-                                        className="w-full bg-[#121212] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all text-sm"
-                                    />
-                                )}
-                                {fieldType === 'checkbox' && (
-                                    <label className="flex items-center gap-3 p-3 bg-[#121212] border border-white/10 rounded-xl cursor-pointer hover:bg-white/5 transition-colors">
-                                        <input 
-                                            type="checkbox" 
-                                            checked={!!val}
-                                            onChange={(e) => updateConfigValue(fieldKey, e.target.checked)}
-                                            className="w-5 h-5 rounded border-zinc-600 text-blue-600 focus:ring-blue-500 bg-zinc-700"
-                                        />
-                                        <span className="text-sm font-medium text-white">{t(label, language)}</span>
-                                    </label>
-                                )}
-                                {fieldType === 'select' && (
-                                    <select
-                                        value={val}
-                                        onChange={(e) => updateConfigValue(fieldKey, e.target.value)}
-                                        className="w-full bg-[#121212] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500/50 transition-all text-sm"
-                                    >
-                                        {(field.options || []).map(opt => (
-                                            <option key={opt.id || opt.value || opt} value={opt.id || opt.value || opt}>
-                                                {opt.label || opt.name || opt}
-                                            </option>
-                                        ))}
-                                    </select>
-                                )}
-                                {fieldType === 'richtext' && (
-                                    <div className="space-y-2">
-                                        <textarea
-                                            value={val}
-                                            onChange={(e) => updateConfigValue(fieldKey, e.target.value)}
-                                            placeholder={t(placeholder, language)}
-                                            className="w-full bg-[#121212] border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:border-blue-500 outline-none transition-colors min-h-[100px] resize-y"
-                                        />
-                                        <div className="bg-[#1a1a1a] border border-white/5 rounded-xl p-3">
-                                            <div className="text-[10px] text-zinc-500 mb-2 uppercase tracking-wider font-bold">{t('plugins_page.preview', language)}</div>
-                                            <div 
-                                                className="prose prose-invert prose-sm max-w-none text-zinc-300 [&>h1]:text-white [&>h1]:text-lg [&>h1]:font-bold [&>h2]:text-white [&>h2]:text-base [&>h2]:font-bold [&>p]:my-1"
-                                                dangerouslySetInnerHTML={{ __html: sanitizeHtml(val) }}
-                                            />
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                            );
-                        })
-                    ) : (
-                        <div className="text-center text-zinc-500 py-10">{t('plugins_page.no_config', language)}</div>
-                    )}
-                </div>
-
-                {/* Footer */}
-                <div className="h-20 border-t border-white/5 bg-[#252525] rounded-b-2xl flex items-center justify-end px-6 gap-3">
-                    <button onClick={() => setConfigModal({ show: false, plugin: null, values: {} })} className="px-5 py-2.5 rounded-xl text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer">{t('plugins_page.cancel', language)}</button>
-                    <button onClick={handleSaveConfig} className="px-6 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg transition-all cursor-pointer" style={{ backgroundColor: accentColor }}>{t('plugins_page.save', language)}</button>
-                </div>
-            </div>
-        </div>
-      )}
-      {/* Installation Modal */}
-      {installModal.show && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-[#1e1e1e] border border-white/10 rounded-2xl shadow-2xl max-w-lg w-full flex flex-col animate-in zoom-in-95 duration-200">
-            <div className="h-16 border-b border-white/5 flex items-center justify-between px-6 bg-[#252525] rounded-t-2xl">
-              <h2 className="text-lg font-bold text-white">
-                {installModal.mode === 'url'
-                  ? (language === 'tr' ? 'URL’den ZIP Kur' : 'Install ZIP from URL')
-                  : (language === 'tr' ? 'Dosyadan ZIP Kur' : 'Install ZIP from File')}
-              </h2>
-              <button
-                onClick={() => setInstallModal({ show: false, mode: 'file', filePath: '', url: '', sha256: '', dirName: '', error: '' })}
-                className="text-zinc-400 hover:text-white transition-colors cursor-pointer"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18"/><path d="M6 6 18 18"/></svg>
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4">
-              {installModal.mode === 'url' ? (
-                <>
-                  <label className="block space-y-1.5">
-                    <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">ZIP URL</span>
-                    <input
-                      type="url"
-                      value={installModal.url}
-                      onChange={(event) => setInstallModal(prev => ({ ...prev, url: event.target.value, error: '' }))}
-                      placeholder="https://example.com/plugin.zip"
-                      className="w-full bg-[#121212] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500/50 text-sm"
-                    />
-                  </label>
-                  <label className="block space-y-1.5">
-                    <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">SHA-256</span>
-                    <input
-                      type="text"
-                      value={installModal.sha256}
-                      onChange={(event) => setInstallModal(prev => ({ ...prev, sha256: event.target.value, error: '' }))}
-                      placeholder="64 hexadecimal characters"
-                      className="w-full bg-[#121212] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500/50 text-sm font-mono"
-                    />
-                  </label>
-                </>
-              ) : (
-                <>
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">ZIP File</span>
-                    <p className="text-sm text-zinc-300 bg-[#121212] border border-white/10 rounded-xl px-4 py-3 break-all">{installModal.filePath}</p>
-                  </div>
-                  <label className="block space-y-1.5">
-                    <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">SHA-256 (optional)</span>
-                    <input
-                      type="text"
-                      value={installModal.sha256}
-                      onChange={(event) => setInstallModal(prev => ({ ...prev, sha256: event.target.value, error: '' }))}
-                      placeholder="64 hexadecimal characters"
-                      className="w-full bg-[#121212] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500/50 text-sm font-mono"
-                    />
-                  </label>
-                  {!installModal.sha256.trim() && (
-                    <p className="text-xs text-amber-400 leading-relaxed">
-                      {language === 'tr'
-                        ? 'SHA-256 boş. Dosya kaynağı doğrulanamaz; kurulum doğrulanmamış sayılır.'
-                        : 'No SHA-256. The file source cannot be verified; this install is considered unverified.'}
-                    </p>
-                  )}
-                </>
-              )}
-
-              <label className="block space-y-1.5">
-                <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">{language === 'tr' ? 'Klasör adı (isteğe bağlı)' : 'Folder name (optional)'}</span>
-                <input
-                  type="text"
-                  value={installModal.dirName}
-                  onChange={(event) => setInstallModal(prev => ({ ...prev, dirName: event.target.value, error: '' }))}
-                  placeholder={language === 'tr' ? 'Boş bırakılırsa plugin kimliği kullanılır' : 'Leave empty to use the plugin identifier'}
-                  className="w-full bg-[#121212] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500/50 text-sm"
-                />
-              </label>
-
-              {installModal.error && <p className="text-xs text-red-400 break-words leading-relaxed">{installModal.error}</p>}
-            </div>
-
-            <div className="h-20 border-t border-white/5 bg-[#252525] rounded-b-2xl flex items-center justify-end px-6 gap-3">
-              <button
-                onClick={() => setInstallModal({ show: false, mode: 'file', filePath: '', url: '', sha256: '', dirName: '', error: '' })}
-                className="px-5 py-2.5 rounded-xl text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
-              >
-                {t('plugins_page.cancel', language)}
-              </button>
-              <button
-                disabled={storeBusy}
-                onClick={submitInstall}
-                className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg transition-all cursor-pointer disabled:opacity-50"
-                style={{ backgroundColor: accentColor }}
-              >
-                {storeBusy ? (
-                  <>
-                    <Spinner className="w-4 h-4" />
-                    {language === 'tr' ? 'Kuruluyor…' : 'Installing…'}
-                  </>
-                ) : (language === 'tr' ? 'Kur' : 'Install')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Confirmation Modal */}
-      {confirmModal && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-[#1e1e1e] border border-white/10 rounded-2xl shadow-2xl max-w-md w-full animate-in zoom-in-95 duration-200">
-            <div className="p-6 space-y-3">
-              <h2 className="text-lg font-bold text-white">{confirmModal.title}</h2>
-              <p className="text-sm text-zinc-400 leading-relaxed">{confirmModal.message}</p>
-            </div>
-            <div className="h-20 border-t border-white/5 bg-[#252525] rounded-b-2xl flex items-center justify-end px-6 gap-3">
-              <button onClick={() => setConfirmModal(null)} className="px-5 py-2.5 rounded-xl text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer">
-                {t('plugins_page.cancel', language)}
-              </button>
-              <button
-                onClick={confirmModal.onConfirm}
-                className="px-6 py-2.5 rounded-xl text-sm font-bold text-white shadow-lg transition-all cursor-pointer"
-                style={{ backgroundColor: confirmModal.destructive ? '#dc2626' : accentColor }}
-              >
-                {confirmModal.confirmLabel}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {overlays}
     </div>
   );
 }
